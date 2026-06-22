@@ -1,103 +1,57 @@
 /**
- * storage.ts — Append-only campaign event log + campaign state
- *
- * Stores an array of typed CampaignEvents and derived CampaignState.
- * State is projected from events on load, making future
- * migration to Supabase straightforward.
+ * storage.ts — Typed sessionStorage/localStorage helpers.
+ * Uses crypto.randomUUID() (native browser API — no external dependency).
  */
 
-import { v4 as uuidv4 } from 'https://esm.sh/uuid@9';
-import { campaignStateSchema } from './schemas';
-import type { CampaignState, CampaignEvent, AdventureOptions, Character } from './schemas';
+const SESSION_KEY = 'dm_session_v1';
+const CAMPAIGN_KEY = 'dm_campaign_v1';
+const CHARACTER_KEY = 'dm_character_v1';
 
-const CAMPAIGNS_KEY = 'dm_campaigns_v1';
-const ACTIVE_CAMPAIGN_KEY = 'dm_active_campaign_v1';
-
-/** Generate a UUID (crypto-backed) */
-export function newId(): string {
-  return uuidv4();
+export function generateId(): string {
+  // Native browser API — no npm package needed
+  return crypto.randomUUID();
 }
 
-/** Save full campaign state to localStorage */
-export function saveCampaign(state: CampaignState): void {
-  const all = loadAllCampaigns();
-  all[state.id] = { ...state, updatedAt: new Date().toISOString() };
-  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(all));
-}
-
-/** Load a single campaign by ID, validated with Zod */
-export function loadCampaign(id: string): CampaignState | null {
-  const all = loadAllCampaigns();
-  const raw = all[id];
+function safeParse<T>(raw: string | null): T | null {
   if (!raw) return null;
-  const parsed = campaignStateSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
+  try { return JSON.parse(raw) as T; } catch { return null; }
 }
 
-/** List all campaign summaries */
-export function listCampaigns(): { id: string; title: string; updatedAt: string; mode: string }[] {
-  const all = loadAllCampaigns();
-  return Object.values(all).map(c => ({
-    id: c.id,
-    title: c.title,
-    updatedAt: c.updatedAt,
-    mode: c.options.mode,
-  }));
+// ─── Session ─────────────────────────────────────────────────────────────────
+export function saveSession(data: unknown): void {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(data));
 }
 
-/** Delete a campaign */
-export function deleteCampaign(id: string): void {
-  const all = loadAllCampaigns();
-  delete all[id];
-  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(all));
-  if (getActiveCampaignId() === id) clearActiveCampaign();
+export function loadSession<T>(): T | null {
+  return safeParse<T>(sessionStorage.getItem(SESSION_KEY));
 }
 
-/** Append an event to the campaign's event log */
-export function appendEvent(campaignId: string, event: CampaignEvent): void {
-  const state = loadCampaign(campaignId);
-  if (!state) throw new Error(`Campaign ${campaignId} not found`);
-  state.events.push(event);
-  saveCampaign(state);
+export function clearSession(): void {
+  sessionStorage.removeItem(SESSION_KEY);
 }
 
-/** Create a new campaign from options + characters */
-export function createCampaign(
-  title: string,
-  options: AdventureOptions,
-  characters: Character[]
-): CampaignState {
-  const now = new Date().toISOString();
-  const state: CampaignState = {
-    id: newId(),
-    title,
-    options,
-    characters,
-    events: [{ type: 'session_started', timestamp: now, options }],
-    messages: [],
-    createdAt: now,
-    updatedAt: now,
-  };
-  saveCampaign(state);
-  setActiveCampaign(state.id);
-  return state;
+// ─── Campaign (persisted across tabs) ────────────────────────────────────────
+export function saveCampaign(data: unknown): void {
+  localStorage.setItem(CAMPAIGN_KEY, JSON.stringify(data));
 }
 
-/** Active campaign helpers */
-export function getActiveCampaignId(): string | null {
-  return sessionStorage.getItem(ACTIVE_CAMPAIGN_KEY);
-}
-export function setActiveCampaign(id: string): void {
-  sessionStorage.setItem(ACTIVE_CAMPAIGN_KEY, id);
-}
-export function clearActiveCampaign(): void {
-  sessionStorage.removeItem(ACTIVE_CAMPAIGN_KEY);
+export function loadCampaign<T>(): T | null {
+  return safeParse<T>(localStorage.getItem(CAMPAIGN_KEY));
 }
 
-function loadAllCampaigns(): Record<string, CampaignState> {
-  try {
-    const raw = localStorage.getItem(CAMPAIGNS_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw) as Record<string, CampaignState>;
-  } catch { return {}; }
+export function clearCampaign(): void {
+  localStorage.removeItem(CAMPAIGN_KEY);
+}
+
+// ─── Character ───────────────────────────────────────────────────────────────
+export function saveCharacter(data: unknown): void {
+  localStorage.setItem(CHARACTER_KEY, JSON.stringify(data));
+}
+
+export function loadCharacter<T>(): T | null {
+  return safeParse<T>(localStorage.getItem(CHARACTER_KEY));
+}
+
+export function clearCharacter(): void {
+  localStorage.removeItem(CHARACTER_KEY);
 }
