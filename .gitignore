@@ -1,0 +1,30 @@
+# Deps
+node_modules
+
+# Build
+dist
+dist-ssr
+*.local
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Sourcemaps (never commit)
+*.js.map
+*.ts.map
