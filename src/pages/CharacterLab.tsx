@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { characterSchema } from '../lib/schemas';
 import type { Character } from '../lib/schemas';
 import { newId } from '../lib/storage';
+import { addCharacterToActiveCampaign } from '../lib/storageHelpers';
 import { abilityModifier, formatModifier } from '../lib/dice';
 
 const RACES = ['Human','Elf','Dwarf','Halfling','Dragonborn','Gnome','Half-Elf','Half-Orc','Tiefling'];
@@ -43,14 +44,29 @@ export default function CharacterLab() {
     };
     const parsed = characterSchema.safeParse(candidate);
     if (!parsed.success) { setError(parsed.error.errors[0].message); return; }
+
+    // Attach to active campaign
+    addCharacterToActiveCampaign({
+      id: parsed.data.id,
+      characterName: parsed.data.characterName,
+      class: parsed.data.class,
+      level: parsed.data.level,
+    });
+
     setCreated(parsed.data);
     setError(null);
   }
 
   if (created) {
     return (
-      <div style={{ maxWidth: 'var(--content-narrow)', margin: '0 auto', padding: 'var(--space-12) var(--space-6)', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', alignItems: 'center' }}>
-        <div style={{ fontSize: 'var(--text-xl)', color: 'var(--color-primary)', fontFamily: 'var(--font-display)' }}>{created.characterName} is ready!</div>
+      <div style={{
+        maxWidth: 'var(--content-narrow)', margin: '0 auto',
+        padding: 'var(--space-12) var(--space-6)', textAlign: 'center',
+        display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', alignItems: 'center'
+      }}>
+        <div style={{ fontSize: 'var(--text-xl)', color: 'var(--color-primary)', fontFamily: 'var(--font-display)' }}>
+          {created.characterName} is ready!
+        </div>
         <div className="card" style={{ width: '100%', textAlign: 'left' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>
             <div><strong>Race:</strong> {created.race}</div>
@@ -62,9 +78,11 @@ export default function CharacterLab() {
             ))}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-          <button className="btn btn-primary" onClick={() => navigate('/play')}>Go to Play &rarr;</button>
-          <button className="btn btn-ghost" onClick={() => setCreated(null)}>Add Another</button>
+        <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <button className="btn btn-primary" onClick={() => navigate('/play')}>Begin Adventure &rarr;</button>
+          <button className="btn btn-ghost" onClick={() => { setCreated(null); setForm({ characterName: '', playerName: '', race: RACES[0], class: CLASSES[4], background: BACKGROUNDS[0], alignment: ALIGNMENTS[0], level: 1, abilityScores: { ...DEFAULT_SCORES }, armorClass: 10, speed: 30, hitPointMaximum: 10, currentHitPoints: 10, equipment: '', traits: '', ideals: '', bonds: '', flaws: '' }); }}>
+            Add Another Character
+          </button>
         </div>
       </div>
     );
@@ -72,7 +90,16 @@ export default function CharacterLab() {
 
   return (
     <div style={{ maxWidth: 'var(--content-narrow)', margin: '0 auto', padding: 'var(--space-12) var(--space-6)' }}>
-      <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-xl)', marginBottom: 'var(--space-6)', color: 'var(--color-primary)' }}>Character Lab</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-6)' }}>
+        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-xl)', color: 'var(--color-primary)' }}>Character Lab</h1>
+        <button
+          className="btn btn-ghost"
+          style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}
+          onClick={() => navigate('/play')}
+        >
+          Skip &rarr; Play without character
+        </button>
+      </div>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-6)' }}>
@@ -83,16 +110,17 @@ export default function CharacterLab() {
       {tab === 'import' && (
         <div className="card" style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
           <div style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-3)' }}>PDF Import</div>
-          <p style={{ fontSize: 'var(--text-sm)' }}>Upload a filled D&amp;D 5e character sheet PDF.<br/>PDF parsing worker coming in next milestone.</p>
+          <p style={{ fontSize: 'var(--text-sm)' }}>Upload a filled D&amp;D 5e character sheet PDF.<br />PDF parsing coming in Phase 2.</p>
           <input type="file" accept=".pdf" style={{ marginTop: 'var(--space-4)' }}
             aria-label="Upload character sheet PDF"
-            onChange={() => alert('PDF parsing will be available in the next milestone.')}
+            onChange={() => alert('PDF parsing will be available shortly.')}
           />
         </div>
       )}
 
       {tab === 'create' && (
         <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+
           {/* Identity */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
             <div>
