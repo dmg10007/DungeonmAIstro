@@ -6,6 +6,7 @@ const NAV_LINKS = [
   { to: '/setup', label: 'New Adventure' },
   { to: '/characters', label: 'Characters' },
   { to: '/play', label: 'Play' },
+  { to: '/combat', label: 'Combat' },
   { to: '/settings', label: 'Settings' },
 ];
 

@@ -4,6 +4,7 @@ import Home from './pages/Home';
 import Setup from './pages/Setup';
 import CharacterLab from './pages/CharacterLab';
 import Play from './pages/Play';
+import Combat from './pages/Combat';
 import Settings from './pages/Settings';
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/setup" element={<Setup />} />
           <Route path="/characters" element={<CharacterLab />} />
           <Route path="/play" element={<Play />} />
+          <Route path="/combat" element={<Combat />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
