@@ -1,76 +1,115 @@
 /**
  * Dice Engine
- * Supports d4, d6, d8, d10, d12, d20, d100.
- * Uses crypto.getRandomValues for unbiased results.
+ * Supports all D&D 5e dice: d4, d6, d8, d10, d12, d20, d100
+ * Uses crypto.getRandomValues for unbiased rolls.
  */
-import { type DiceRollRequest, type DiceRollResult, type DiceSides } from './schemas';
 
-const VALID_SIDES: DiceSides[] = [4, 6, 8, 10, 12, 20, 100];
+import type { DieFace, DiceRollResult } from './schemas';
+import { DiceNotationSchema } from './schemas';
 
-function generateId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
+const VALID_FACES: DieFace[] = [4, 6, 8, 10, 12, 20, 100];
 
-/** Roll a single die using crypto.getRandomValues for uniform distribution. */
-function rollOne(sides: DiceSides): number {
-  const max = sides;
+/** Roll a single die of n sides using a cryptographically random source. */
+export function rollDie(sides: DieFace): number {
   // Rejection sampling to eliminate modulo bias
-  const limit = Math.floor(0x100000000 / max) * max;
+  const limit = Math.floor(0x100000000 / sides) * sides;
   const buf = new Uint32Array(1);
-  let val: number;
+  let value: number;
   do {
     crypto.getRandomValues(buf);
-    val = buf[0];
-  } while (val >= limit);
-  return (val % max) + 1;
+    value = buf[0];
+  } while (value >= limit);
+  return (value % sides) + 1;
 }
 
-/** Roll dice according to a DiceRollRequest. */
-export function rollDice(req: DiceRollRequest): DiceRollResult {
-  const rolls: number[] = [];
-  const count = req.count ?? 1;
-  for (let i = 0; i < count; i++) {
-    rolls.push(rollOne(req.sides));
+/** Parse dice notation like "2d6+3" into parts. */
+export function parseNotation(notation: string): {
+  count: number;
+  sides: DieFace;
+  modifier: number;
+} {
+  DiceNotationSchema.parse(notation); // throws if invalid
+  const match = notation
+    .toLowerCase()
+    .match(/^(\d+)?d(\d+)([+-]\d+)?$/);
+  if (!match) throw new Error(`Unparseable notation: ${notation}`);
+
+  const count = parseInt(match[1] ?? '1', 10);
+  const sides = parseInt(match[2], 10) as DieFace;
+  const modifier = match[3] ? parseInt(match[3], 10) : 0;
+
+  if (!VALID_FACES.includes(sides)) {
+    throw new Error(`Invalid die face: d${sides}. Must be one of ${VALID_FACES.join(', ')}`);
   }
-  const sum = rolls.reduce((a, b) => a + b, 0);
-  const modifier = req.modifier ?? 0;
+
+  return { count, sides, modifier };
+}
+
+/**
+ * Roll dice by notation string.
+ * Returns full result including individual rolls, modifier, and total.
+ */
+export function roll(
+  notation: string,
+  opts?: {
+    actorType?: DiceRollResult['actorType'];
+    actorId?: string;
+    reason?: string;
+    advantage?: boolean;
+    disadvantage?: boolean;
+  },
+): DiceRollResult {
+  const { count, sides, modifier } = parseNotation(notation);
+
+  let rolls: number[];
+
+  if ((opts?.advantage || opts?.disadvantage) && count === 1 && sides === 20) {
+    // Advantage/Disadvantage: roll twice, take highest or lowest
+    const r1 = rollDie(sides);
+    const r2 = rollDie(sides);
+    rolls = opts.advantage ? [Math.max(r1, r2)] : [Math.min(r1, r2)];
+  } else {
+    rolls = Array.from({ length: count }, () => rollDie(sides));
+  }
+
+  const total = rolls.reduce((a, b) => a + b, 0) + modifier;
+
   return {
-    ...req,
-    count,
-    modifier,
+    notation,
     rolls,
-    total: sum + modifier,
+    modifier,
+    total,
+    actorType: opts?.actorType ?? 'system',
+    actorId: opts?.actorId,
+    reason: opts?.reason,
     timestamp: Date.now(),
-    id: generateId(),
   };
 }
 
-/** Parse a dice notation string like "2d6+3" into a DiceRollRequest. */
-export function parseNotation(
-  notation: string,
-  actorType: DiceRollRequest['actorType'] = 'system',
-): DiceRollRequest | null {
-  const match = notation.trim().match(/^(\d{1,2})?d(\d+)([+-]\d{1,3})?$/i);
-  if (!match) return null;
+/** Shorthand helpers */
+export const d4  = (opts?: Parameters<typeof roll>[1]) => roll('d4',  opts);
+export const d6  = (opts?: Parameters<typeof roll>[1]) => roll('d6',  opts);
+export const d8  = (opts?: Parameters<typeof roll>[1]) => roll('d8',  opts);
+export const d10 = (opts?: Parameters<typeof roll>[1]) => roll('d10', opts);
+export const d12 = (opts?: Parameters<typeof roll>[1]) => roll('d12', opts);
+export const d20 = (opts?: Parameters<typeof roll>[1]) => roll('d20', opts);
+export const d100= (opts?: Parameters<typeof roll>[1]) => roll('d100',opts);
 
-  const count = match[1] ? parseInt(match[1], 10) : 1;
-  const sides = parseInt(match[2], 10);
-  const modifier = match[3] ? parseInt(match[3], 10) : 0;
-
-  if (!VALID_SIDES.includes(sides as DiceSides)) return null;
-  if (count < 1 || count > 20) return null;
-
-  return { count, sides: sides as DiceSides, modifier, actorType };
+/** Roll 4d6, drop lowest — standard ability score generation. */
+export function rollAbilityScore(): { rolls: number[]; dropped: number; result: number } {
+  const rolls = Array.from({ length: 4 }, () => rollDie(6));
+  const sorted = [...rolls].sort((a, b) => a - b);
+  const dropped = sorted[0];
+  const result = sorted.slice(1).reduce((a, b) => a + b, 0);
+  return { rolls, dropped, result };
 }
 
-/** Get the ability score modifier per 5e rules: floor((score - 10) / 2). */
+/** Calculate standard D&D 5e ability modifier. */
 export function abilityModifier(score: number): number {
   return Math.floor((score - 10) / 2);
 }
 
-/** Format a modifier as a signed string: +3 or -1. */
-export function formatModifier(mod: number): string {
-  return mod >= 0 ? `+${mod}` : `${mod}`;
+/** Calculate proficiency bonus for a given character level. */
+export function proficiencyBonus(level: number): number {
+  return Math.ceil(level / 4) + 1;
 }
-
-export { VALID_SIDES };
