@@ -4,6 +4,7 @@
  */
 
 import type { Campaign, Character, Session } from '../types';
+import type { AdventureOptions } from './schemas';
 
 const SESSION_KEY   = 'dm_session_v1';
 const CAMPAIGNS_KEY = 'dm_campaigns_v1';
@@ -29,8 +30,16 @@ export function clearSession(): void {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
-// ─── Campaigns (persisted) ───────────────────────────────────────────────────
-type CampaignSummary = Pick<Campaign, 'id' | 'setup' | 'createdAt' | 'updatedAt'> & { title: string; mode: string };
+// ─── Campaign summary list ──────────────────────────────────────────────────
+
+export interface CampaignSummary {
+  id: string;
+  title: string;
+  mode: string;
+  setup: AdventureOptions;
+  createdAt: number;
+  updatedAt: number;
+}
 
 function loadCampaignsRaw(): CampaignSummary[] {
   return safeParse<CampaignSummary[]>(localStorage.getItem(CAMPAIGNS_KEY)) ?? [];
@@ -40,19 +49,40 @@ export function listCampaigns(): CampaignSummary[] {
   return loadCampaignsRaw().sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/** Create a brand-new campaign record and return its generated ID. */
+export function createCampaign(
+  title: string,
+  setup: AdventureOptions,
+  _characters: string[] = []
+): string {
+  const id = generateId();
+  const now = Date.now();
+  const summary: CampaignSummary = {
+    id,
+    title: title.trim() || `Adventure — ${new Date(now).toLocaleDateString()}`,
+    mode: setup.mode,
+    setup,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const list = loadCampaignsRaw();
+  list.unshift(summary);
+  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(list));
+  return id;
+}
+
 export function saveCampaign(campaign: Campaign): void {
   const list = loadCampaignsRaw().filter(c => c.id !== campaign.id);
   const summary: CampaignSummary = {
     id: campaign.id,
-    setup: campaign.setup,
     title: campaign.setup.title,
     mode: campaign.setup.length,
+    setup: campaign.setup as unknown as AdventureOptions,
     createdAt: campaign.createdAt,
     updatedAt: campaign.updatedAt,
   };
   list.unshift(summary);
   localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(list));
-  // Also store full campaign data under its own key
   localStorage.setItem(`dm_campaign_${campaign.id}`, JSON.stringify(campaign));
 }
 
