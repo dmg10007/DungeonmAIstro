@@ -1,36 +1,58 @@
 /**
- * Safe HTML sanitizer wrapper.
- * Always use this before rendering any LLM or user-generated content as HTML.
- * DOMPurify is configured to a minimal safe subset.
+ * Sanitization utilities.
+ * All LLM output and user-supplied HTML MUST pass through sanitize()
+ * before being injected into the DOM.
+ *
+ * Uses DOMPurify with a strict allowlist.
+ * dangerouslySetInnerHTML is the ONLY acceptable injection point,
+ * and only after sanitize() has been called.
  */
+
 import DOMPurify from 'dompurify';
 
-const purifyConfig: DOMPurify.Config = {
-  ALLOWED_TAGS: [
-    'p', 'br', 'strong', 'em', 'b', 'i', 'u', 's',
-    'ul', 'ol', 'li',
-    'h1', 'h2', 'h3', 'h4',
-    'blockquote', 'code', 'pre',
-    'hr', 'span',
-  ],
-  ALLOWED_ATTR: ['class'],
-  FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
-  FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'href', 'src', 'action'],
-  FORCE_BODY: true,
-};
+const ALLOWED_TAGS = [
+  'p', 'br', 'strong', 'em', 'b', 'i', 'u', 's',
+  'ul', 'ol', 'li',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'blockquote', 'hr', 'code', 'pre', 'table',
+  'thead', 'tbody', 'tr', 'th', 'td',
+  'span', 'div', 'section', 'article',
+];
+
+const ALLOWED_ATTR = ['class', 'id', 'aria-label', 'role'];
 
 /**
- * Sanitize an HTML string for safe rendering.
- * Use for all LLM output and imported text displayed as HTML.
+ * Sanitize HTML string. Use for LLM-rendered Markdown output.
+ * Returns safe HTML string — safe to pass to dangerouslySetInnerHTML.
  */
-export function sanitizeHtml(dirty: string): string {
-  return DOMPurify.sanitize(dirty, purifyConfig);
+export function sanitize(dirty: string): string {
+  return DOMPurify.sanitize(dirty, {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR,
+    FORBID_ATTR: ['style', 'onerror', 'onload', 'onclick', 'onmouseover'],
+    FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'iframe', 'link', 'meta'],
+    ALLOW_DATA_ATTR: false,
+    FORCE_BODY: false,
+  });
 }
 
 /**
- * Strip all HTML from a string, returning plain text.
- * Use when you need the text content of an HTML string.
+ * Strip ALL HTML — returns plaintext only.
+ * Use for user-supplied names, labels, and form fields.
  */
-export function stripHtml(html: string): string {
-  return DOMPurify.sanitize(html, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+export function stripHtml(dirty: string): string {
+  return DOMPurify.sanitize(dirty, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+}
+
+/**
+ * Sanitize a string for safe display as text content (not HTML).
+ * Escapes special characters so the string renders literally.
+ */
+export function escapeText(str: string): string {
+  return str
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;')
+    .replace(/'/g,  '&#x27;');
 }

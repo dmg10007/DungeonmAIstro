@@ -2,19 +2,20 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles/base.css';
+import { pruneExpired } from './lib/vault';
 
-// Apply stored or system theme before first paint to avoid flash
+// Apply saved theme before first paint to avoid flash
 (function initTheme() {
-  const stored = localStorage.getItem('dm-theme');
+  const saved = localStorage.getItem('dmg_theme');
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const theme = stored ?? (prefersDark ? 'dark' : 'light');
+  const theme = saved ?? (prefersDark ? 'dark' : 'light');
   document.documentElement.setAttribute('data-theme', theme);
 })();
 
-const root = document.getElementById('root');
-if (!root) throw new Error('Root element not found');
+// Prune any expired API keys silently
+try { pruneExpired(); } catch { /* vault may be empty on first load */ }
 
-ReactDOM.createRoot(root).render(
+ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,
