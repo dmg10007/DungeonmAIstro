@@ -9,18 +9,15 @@ import Settings from './pages/Settings';
 export default function App() {
   return (
     <BrowserRouter>
-      <a href="#main-content" className="sr-only">
-        Skip to content
-      </a>
       <NavBar />
-      <main id="main-content">
+      <main style={{ minHeight: '100dvh', paddingTop: 'var(--space-16)' }}>
         <Routes>
-          <Route path="/"             element={<Home />} />
-          <Route path="/setup"        element={<Setup />} />
-          <Route path="/character"    element={<CharacterLab />} />
-          <Route path="/play"         element={<Play />} />
-          <Route path="/settings"     element={<Settings />} />
-          <Route path="*"             element={<Navigate to="/" replace />} />
+          <Route path="/" element={<Home />} />
+          <Route path="/setup" element={<Setup />} />
+          <Route path="/characters" element={<CharacterLab />} />
+          <Route path="/play" element={<Play />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </BrowserRouter>
