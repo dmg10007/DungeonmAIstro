@@ -1,113 +1,103 @@
 /**
- * Campaign Event Log
- * Append-only event store in localStorage.
- * State is derived from events, never mutated in place.
+ * storage.ts — Append-only campaign event log + campaign state
+ *
+ * Stores an array of typed CampaignEvents and derived CampaignState.
+ * State is projected from events on load, making future
+ * migration to Supabase straightforward.
  */
 
-import { z } from 'zod';
-import { CampaignSchema, CampaignEventSchema, type Campaign, type CampaignEvent } from './schemas';
+import { v4 as uuidv4 } from 'https://esm.sh/uuid@9';
+import { campaignStateSchema } from './schemas';
+import type { CampaignState, CampaignEvent, AdventureOptions, Character } from './schemas';
 
-const CAMPAIGNS_KEY = 'dmg_campaigns_v1';
-const SCHEMA_VERSION = 1;
+const CAMPAIGNS_KEY = 'dm_campaigns_v1';
+const ACTIVE_CAMPAIGN_KEY = 'dm_active_campaign_v1';
 
-interface StorageEnvelope {
-  version: number;
-  campaigns: unknown[];
+/** Generate a UUID (crypto-backed) */
+export function newId(): string {
+  return uuidv4();
 }
 
-function loadEnvelope(): StorageEnvelope {
+/** Save full campaign state to localStorage */
+export function saveCampaign(state: CampaignState): void {
+  const all = loadAllCampaigns();
+  all[state.id] = { ...state, updatedAt: new Date().toISOString() };
+  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(all));
+}
+
+/** Load a single campaign by ID, validated with Zod */
+export function loadCampaign(id: string): CampaignState | null {
+  const all = loadAllCampaigns();
+  const raw = all[id];
+  if (!raw) return null;
+  const parsed = campaignStateSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** List all campaign summaries */
+export function listCampaigns(): { id: string; title: string; updatedAt: string; mode: string }[] {
+  const all = loadAllCampaigns();
+  return Object.values(all).map(c => ({
+    id: c.id,
+    title: c.title,
+    updatedAt: c.updatedAt,
+    mode: c.options.mode,
+  }));
+}
+
+/** Delete a campaign */
+export function deleteCampaign(id: string): void {
+  const all = loadAllCampaigns();
+  delete all[id];
+  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(all));
+  if (getActiveCampaignId() === id) clearActiveCampaign();
+}
+
+/** Append an event to the campaign's event log */
+export function appendEvent(campaignId: string, event: CampaignEvent): void {
+  const state = loadCampaign(campaignId);
+  if (!state) throw new Error(`Campaign ${campaignId} not found`);
+  state.events.push(event);
+  saveCampaign(state);
+}
+
+/** Create a new campaign from options + characters */
+export function createCampaign(
+  title: string,
+  options: AdventureOptions,
+  characters: Character[]
+): CampaignState {
+  const now = new Date().toISOString();
+  const state: CampaignState = {
+    id: newId(),
+    title,
+    options,
+    characters,
+    events: [{ type: 'session_started', timestamp: now, options }],
+    messages: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  saveCampaign(state);
+  setActiveCampaign(state.id);
+  return state;
+}
+
+/** Active campaign helpers */
+export function getActiveCampaignId(): string | null {
+  return sessionStorage.getItem(ACTIVE_CAMPAIGN_KEY);
+}
+export function setActiveCampaign(id: string): void {
+  sessionStorage.setItem(ACTIVE_CAMPAIGN_KEY, id);
+}
+export function clearActiveCampaign(): void {
+  sessionStorage.removeItem(ACTIVE_CAMPAIGN_KEY);
+}
+
+function loadAllCampaigns(): Record<string, CampaignState> {
   try {
     const raw = localStorage.getItem(CAMPAIGNS_KEY);
-    if (!raw) return { version: SCHEMA_VERSION, campaigns: [] };
-    const parsed = JSON.parse(raw) as StorageEnvelope;
-    if (parsed.version !== SCHEMA_VERSION) {
-      // Future: run migrations here
-      console.warn('[storage] Version mismatch — using empty store.');
-      return { version: SCHEMA_VERSION, campaigns: [] };
-    }
-    return parsed;
-  } catch {
-    return { version: SCHEMA_VERSION, campaigns: [] };
-  }
-}
-
-function saveEnvelope(envelope: StorageEnvelope): void {
-  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(envelope));
-}
-
-/** Load and validate all campaigns from localStorage. */
-export function loadAllCampaigns(): Campaign[] {
-  const { campaigns } = loadEnvelope();
-  return campaigns
-    .map((c) => {
-      const result = CampaignSchema.safeParse(c);
-      if (!result.success) {
-        console.warn('[storage] Skipping invalid campaign record:', result.error.flatten());
-        return null;
-      }
-      return result.data;
-    })
-    .filter((c): c is Campaign => c !== null);
-}
-
-/** Save or overwrite a campaign. */
-export function saveCampaign(campaign: Campaign): void {
-  const validated = CampaignSchema.parse(campaign);
-  const envelope = loadEnvelope();
-  const others = (envelope.campaigns as Campaign[]).filter((c) => {
-    const r = CampaignSchema.safeParse(c);
-    return r.success && r.data.id !== validated.id;
-  });
-  saveEnvelope({ ...envelope, campaigns: [...others, validated] });
-}
-
-/** Append an event to a campaign's event log. */
-export function appendEvent(campaignId: string, event: CampaignEvent): void {
-  const campaigns = loadAllCampaigns();
-  const idx = campaigns.findIndex((c) => c.id === campaignId);
-  if (idx === -1) throw new Error(`Campaign ${campaignId} not found`);
-
-  const validated = CampaignEventSchema.parse(event);
-  const updated: Campaign = {
-    ...campaigns[idx],
-    events: [...campaigns[idx].events, validated],
-    updatedAt: Date.now(),
-  };
-  saveCampaign(updated);
-}
-
-/** Delete a campaign by id. */
-export function deleteCampaign(campaignId: string): void {
-  const envelope = loadEnvelope();
-  const filtered = (envelope.campaigns as Campaign[]).filter((c) => {
-    const r = CampaignSchema.safeParse(c);
-    return r.success && r.data.id !== campaignId;
-  });
-  saveEnvelope({ ...envelope, campaigns: filtered });
-}
-
-/** Export all campaigns as a JSON blob (for manual backup). */
-export function exportAllCampaigns(): string {
-  return JSON.stringify(loadEnvelope(), null, 2);
-}
-
-/** Import campaigns from a JSON string. Validates every record. */
-export function importCampaigns(json: string): { imported: number; skipped: number } {
-  const parsed = z.object({
-    version: z.number(),
-    campaigns: z.array(z.unknown()),
-  }).parse(JSON.parse(json));
-
-  let imported = 0;
-  let skipped = 0;
-  for (const raw of parsed.campaigns) {
-    const result = CampaignSchema.safeParse(raw);
-    if (result.success) {
-      saveCampaign(result.data);
-      imported++;
-    } else {
-      skipped++;
-    }
-  }
-  return { imported, skipped };
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, CampaignState>;
+  } catch { return {}; }
 }

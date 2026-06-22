@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-// ---- API Key Vault ----
+// ----------------------------------------------------------------
+// API Key Vault
+// ----------------------------------------------------------------
 export const LLMProvider = z.enum([
   'openai',
   'anthropic',
@@ -10,167 +12,138 @@ export const LLMProvider = z.enum([
 ]);
 export type LLMProvider = z.infer<typeof LLMProvider>;
 
-export const ApiKeyEntrySchema = z.object({
+export const apiKeyEntrySchema = z.object({
   provider: LLMProvider,
   label: z.string().min(1).max(50),
   model: z.string().min(1).max(100),
   baseUrl: z.string().url().optional(),
-  encryptedKey: z.string().min(1),
-  iv: z.string().min(1),
-  salt: z.string().min(1),
-  expiresAt: z.number().positive(), // unix ms
+  storedAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
 });
-export type ApiKeyEntry = z.infer<typeof ApiKeyEntrySchema>;
+export type ApiKeyEntry = z.infer<typeof apiKeyEntrySchema>;
 
-// ---- Dice ----
-export const DieFace = z.union([
-  z.literal(4),
-  z.literal(6),
-  z.literal(8),
-  z.literal(10),
-  z.literal(12),
-  z.literal(20),
-  z.literal(100),
+// ----------------------------------------------------------------
+// Dice
+// ----------------------------------------------------------------
+export const dieFaceSchema = z.union([
+  z.literal(4), z.literal(6), z.literal(8),
+  z.literal(10), z.literal(12), z.literal(20), z.literal(100),
 ]);
-export type DieFace = z.infer<typeof DieFace>;
+export type DieFace = z.infer<typeof dieFaceSchema>;
 
-export const DiceNotationSchema = z
+export const diceNotationSchema = z
   .string()
-  .regex(/^(\d{1,2})?d(4|6|8|10|12|20|100)([+-]\d{1,3})?$/, {
-    message: 'Invalid dice notation. Examples: d20, 2d6, 1d8+3, d100',
-  });
+  .regex(/^(\d{1,2})?d(4|6|8|10|12|20|100)([+-]\d{1,3})?$/i, 'Invalid dice notation');
 
-export const DiceRollResultSchema = z.object({
-  notation: z.string(),
-  rolls: z.array(z.number().int().positive()),
+export const diceRollResultSchema = z.object({
+  notation: diceNotationSchema,
+  rolls: z.array(z.number().int()),
   modifier: z.number().int(),
   total: z.number().int(),
   actorType: z.enum(['player', 'npc', 'system']),
   actorId: z.string().optional(),
   reason: z.string().max(200).optional(),
-  timestamp: z.number().positive(),
+  timestamp: z.string().datetime(),
 });
-export type DiceRollResult = z.infer<typeof DiceRollResultSchema>;
+export type DiceRollResult = z.infer<typeof diceRollResultSchema>;
 
-// ---- Ability Scores ----
-const AbilityScore = z.number().int().min(1).max(30);
-
-export const AbilityScoresSchema = z.object({
-  str: AbilityScore,
-  dex: AbilityScore,
-  con: AbilityScore,
-  int: AbilityScore,
-  wis: AbilityScore,
-  cha: AbilityScore,
+// ----------------------------------------------------------------
+// Character
+// ----------------------------------------------------------------
+export const abilityScoresSchema = z.object({
+  str: z.number().int().min(1).max(30),
+  dex: z.number().int().min(1).max(30),
+  con: z.number().int().min(1).max(30),
+  int: z.number().int().min(1).max(30),
+  wis: z.number().int().min(1).max(30),
+  cha: z.number().int().min(1).max(30),
 });
-export type AbilityScores = z.infer<typeof AbilityScoresSchema>;
+export type AbilityScores = z.infer<typeof abilityScoresSchema>;
 
-// ---- Character ----
-export const ExperienceLevel = z.enum(['new', 'intermediate', 'expert']);
-export type ExperienceLevel = z.infer<typeof ExperienceLevel>;
-
-export const CharacterSchema = z.object({
+export const characterSchema = z.object({
   id: z.string().uuid(),
   characterName: z.string().min(1).max(100),
   playerName: z.string().max(100).optional(),
   race: z.string().min(1).max(50),
   class: z.string().min(1).max(50),
-  subclass: z.string().max(80).optional(),
-  background: z.string().max(80).optional(),
+  background: z.string().max(50).optional(),
+  alignment: z.string().max(30).optional(),
   level: z.number().int().min(1).max(20),
   experiencePoints: z.number().int().min(0).optional(),
-  abilityScores: AbilityScoresSchema,
+  abilityScores: abilityScoresSchema,
   proficiencyBonus: z.number().int().min(2).max(6),
-  armorClass: z.number().int().min(1).max(50),
-  initiative: z.number().int().min(-5).max(20),
+  armorClass: z.number().int().min(0).max(30),
+  initiative: z.number().int().optional(),
   speed: z.number().int().min(0).max(120),
   hitPointMaximum: z.number().int().min(1).max(999),
   currentHitPoints: z.number().int().min(0).max(999),
-  temporaryHitPoints: z.number().int().min(0).max(999).default(0),
-  hitDice: z.string().max(20).optional(),
-  deathSaves: z.object({
-    successes: z.number().int().min(0).max(3),
-    failures:  z.number().int().min(0).max(3),
-  }).default({ successes: 0, failures: 0 }),
+  temporaryHitPoints: z.number().int().min(0).max(999).optional(),
   skills: z.record(z.string(), z.boolean()).optional(),
   savingThrows: z.record(z.string(), z.boolean()).optional(),
-  equipment: z.array(z.string().max(200)).optional(),
+  attacks: z.array(z.object({
+    name: z.string().max(80),
+    atkBonus: z.string().max(10),
+    damageType: z.string().max(30),
+  })).optional(),
+  equipment: z.string().max(2000).optional(),
   traits: z.string().max(2000).optional(),
-  ideals: z.string().max(1000).optional(),
-  bonds: z.string().max(1000).optional(),
-  flaws: z.string().max(1000).optional(),
+  ideals: z.string().max(500).optional(),
+  bonds: z.string().max(500).optional(),
+  flaws: z.string().max(500).optional(),
   spellcastingClass: z.string().max(50).optional(),
-  spellcastingAbility: z.string().max(20).optional(),
-  spellSaveDC: z.number().int().min(0).max(30).optional(),
-  spellAttackBonus: z.number().int().min(-5).max(20).optional(),
-  importedFromPdf: z.boolean().default(false),
-  createdAt: z.number().positive(),
-  updatedAt: z.number().positive(),
+  spellcastingAbility: z.string().max(5).optional(),
+  spellSaveDC: z.number().int().optional(),
+  spellAttackBonus: z.number().int().optional(),
+  spells: z.string().max(4000).optional(),
+  source: z.enum(['manual', 'pdf_import']),
+  createdAt: z.string().datetime(),
 });
-export type Character = z.infer<typeof CharacterSchema>;
+export type Character = z.infer<typeof characterSchema>;
 
-// ---- Adventure Setup ----
-export const CampaignMode = z.enum(['one_shot', 'campaign']);
-export type CampaignMode = z.infer<typeof CampaignMode>;
-
-export const ToneOption = z.enum([
-  'heroic',
-  'dark',
-  'comedic',
-  'mystery',
-  'horror',
-  'political',
-  'exploration',
-  'action',
-]);
-export type ToneOption = z.infer<typeof ToneOption>;
-
-export const AdventureOptionsSchema = z.object({
-  mode: CampaignMode,
+// ----------------------------------------------------------------
+// Adventure / Campaign
+// ----------------------------------------------------------------
+export const adventureOptionsSchema = z.object({
+  mode: z.enum(['one_shot', 'campaign']),
   playerCount: z.number().int().min(1).max(4),
+  experienceLevel: z.enum(['new', 'intermediate', 'expert']),
+  tone: z.array(z.string().min(1).max(30)).min(1).max(10),
   desiredLength: z.string().min(1).max(100),
-  tones: z.array(ToneOption).min(1).max(4),
-  experienceLevel: ExperienceLevel,
   settingPrompt: z.string().max(4000),
-  safetyMode: z.enum(['strict', 'balanced']).default('balanced'),
+  safetyMode: z.enum(['strict', 'balanced']),
 });
-export type AdventureOptions = z.infer<typeof AdventureOptionsSchema>;
+export type AdventureOptions = z.infer<typeof adventureOptionsSchema>;
 
-// ---- Campaign Event Log ----
-export const EventType = z.enum([
-  'session_started',
-  'character_created',
-  'character_imported',
-  'scene_opened',
-  'dice_rolled',
-  'npc_introduced',
-  'inventory_changed',
-  'quest_updated',
-  'combat_started',
-  'combat_round_advanced',
-  'combat_ended',
-  'dm_message',
-  'player_message',
-  'session_ended',
+// ----------------------------------------------------------------
+// Campaign Event Log
+// ----------------------------------------------------------------
+export const campaignEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('session_started'), timestamp: z.string().datetime(), options: adventureOptionsSchema }),
+  z.object({ type: z.literal('character_added'), timestamp: z.string().datetime(), character: characterSchema }),
+  z.object({ type: z.literal('scene_opened'), timestamp: z.string().datetime(), sceneId: z.string(), description: z.string().max(5000) }),
+  z.object({ type: z.literal('dice_rolled'), timestamp: z.string().datetime(), result: diceRollResultSchema }),
+  z.object({ type: z.literal('npc_introduced'), timestamp: z.string().datetime(), npcId: z.string(), name: z.string().max(100), description: z.string().max(1000) }),
+  z.object({ type: z.literal('combat_started'), timestamp: z.string().datetime(), participants: z.array(z.string()) }),
+  z.object({ type: z.literal('combat_round_advanced'), timestamp: z.string().datetime(), round: z.number().int().min(1) }),
+  z.object({ type: z.literal('combat_ended'), timestamp: z.string().datetime() }),
+  z.object({ type: z.literal('quest_updated'), timestamp: z.string().datetime(), questId: z.string(), status: z.enum(['active', 'completed', 'failed']), note: z.string().max(500).optional() }),
+  z.object({ type: z.literal('inventory_changed'), timestamp: z.string().datetime(), characterId: z.string(), change: z.string().max(300) }),
+  z.object({ type: z.literal('session_ended'), timestamp: z.string().datetime() }),
 ]);
-export type EventType = z.infer<typeof EventType>;
+export type CampaignEvent = z.infer<typeof campaignEventSchema>;
 
-export const CampaignEventSchema = z.object({
+export const campaignStateSchema = z.object({
   id: z.string().uuid(),
-  type: EventType,
-  timestamp: z.number().positive(),
-  payload: z.record(z.string(), z.unknown()),
+  title: z.string().min(1).max(100),
+  options: adventureOptionsSchema,
+  characters: z.array(characterSchema),
+  events: z.array(campaignEventSchema),
+  messages: z.array(z.object({
+    role: z.enum(['user', 'assistant', 'system']),
+    content: z.string().max(32000),
+    timestamp: z.string().datetime(),
+  })),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
 });
-export type CampaignEvent = z.infer<typeof CampaignEventSchema>;
-
-export const CampaignSchema = z.object({
-  id: z.string().uuid(),
-  title: z.string().min(1).max(200),
-  options: AdventureOptionsSchema,
-  characters: z.array(CharacterSchema),
-  events: z.array(CampaignEventSchema),
-  createdAt: z.number().positive(),
-  updatedAt: z.number().positive(),
-  sessionCount: z.number().int().min(0),
-});
-export type Campaign = z.infer<typeof CampaignSchema>;
+export type CampaignState = z.infer<typeof campaignStateSchema>;
