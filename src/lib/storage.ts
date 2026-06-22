@@ -1,99 +1,139 @@
 /**
- * storage.ts — Typed sessionStorage/localStorage helpers.
- * Uses crypto.randomUUID() (native browser API — no external dependency).
+ * storage.ts — Typed localStorage/sessionStorage helpers.
+ * All IDs use crypto.randomUUID() — no external dependency.
  */
 
-import type { Campaign, Character, Session } from '../types';
-import type { AdventureOptions } from './schemas';
+import type { Character } from '../types';
+import type { AdventureOptions, DiceRollResult } from './schemas';
 
-const SESSION_KEY   = 'dm_session_v1';
-const CAMPAIGNS_KEY = 'dm_campaigns_v1';
-const CHARACTER_KEY = 'dm_character_v1';
+// ─── ID generation ────────────────────────────────────────────────────────────
+export function generateId(): string { return crypto.randomUUID(); }
+/** Alias used by CharacterLab */
+export const newId = generateId;
 
-export function generateId(): string {
-  return crypto.randomUUID();
-}
+// ─── Storage keys ───────────────────────────────────────────────────────────
+const CAMPAIGNS_KEY    = 'dm_campaigns_v1';
+const ACTIVE_KEY       = 'dm_active_campaign';
+const CHARACTER_KEY    = 'dm_character_v1';
+const SESSION_KEY      = 'dm_session_v1';
 
 function safeParse<T>(raw: string | null): T | null {
   if (!raw) return null;
   try { return JSON.parse(raw) as T; } catch { return null; }
 }
 
-// ─── Session (tab-scoped) ────────────────────────────────────────────────────
-export function saveSession(data: Session): void {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(data));
-}
-export function loadSession(): Session | null {
-  return safeParse<Session>(sessionStorage.getItem(SESSION_KEY));
-}
-export function clearSession(): void {
-  sessionStorage.removeItem(SESSION_KEY);
+// ─── Campaign shape used throughout the app ───────────────────────────────────────
+export interface StoredCampaign {
+  id: string;
+  title: string;
+  options: AdventureOptions;
+  /** mode mirrors options.mode for quick access */
+  mode: string;
+  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: string }>;
+  characters: StoredCharacterRef[];
+  events: CampaignEvent[];
+  createdAt: string;
+  updatedAt: string;
 }
 
-// ─── Campaign summary list ──────────────────────────────────────────────────
+export interface StoredCharacterRef {
+  id: string;
+  characterName: string;
+  class: string;
+  level: number;
+}
 
+export interface CampaignEvent {
+  type: string;
+  timestamp: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any;
+}
+
+// ─── Campaign list (summaries) ──────────────────────────────────────────────────
 export interface CampaignSummary {
   id: string;
   title: string;
   mode: string;
-  setup: AdventureOptions;
-  createdAt: number;
-  updatedAt: number;
+  updatedAt: string;
 }
 
-function loadCampaignsRaw(): CampaignSummary[] {
+function loadSummaries(): CampaignSummary[] {
   return safeParse<CampaignSummary[]>(localStorage.getItem(CAMPAIGNS_KEY)) ?? [];
 }
 
-export function listCampaigns(): CampaignSummary[] {
-  return loadCampaignsRaw().sort((a, b) => b.updatedAt - a.updatedAt);
+function saveSummaries(list: CampaignSummary[]): void {
+  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(list));
 }
 
-/** Create a brand-new campaign record and return its generated ID. */
+export function listCampaigns(): CampaignSummary[] {
+  return loadSummaries().sort((a, b) =>
+    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
+}
+
+// ─── Active campaign pointer ──────────────────────────────────────────────────
+export function getActiveCampaignId(): string | null {
+  return localStorage.getItem(ACTIVE_KEY);
+}
+export function setActiveCampaignId(id: string): void {
+  localStorage.setItem(ACTIVE_KEY, id);
+}
+export function clearActiveCampaign(): void {
+  localStorage.removeItem(ACTIVE_KEY);
+}
+
+// ─── Full campaign CRUD ─────────────────────────────────────────────────────────
 export function createCampaign(
   title: string,
-  setup: AdventureOptions,
-  _characters: string[] = []
+  options: AdventureOptions,
+  characters: StoredCharacterRef[] = []
 ): string {
   const id = generateId();
-  const now = Date.now();
-  const summary: CampaignSummary = {
+  const now = new Date().toISOString();
+  const campaign: StoredCampaign = {
     id,
-    title: title.trim() || `Adventure — ${new Date(now).toLocaleDateString()}`,
-    mode: setup.mode,
-    setup,
+    title: title.trim() || `Adventure — ${new Date().toLocaleDateString()}`,
+    options,
+    mode: options.mode,
+    messages: [],
+    characters,
+    events: [],
     createdAt: now,
     updatedAt: now,
   };
-  const list = loadCampaignsRaw();
-  list.unshift(summary);
-  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(list));
+  localStorage.setItem(`dm_campaign_${id}`, JSON.stringify(campaign));
+  const summaries = loadSummaries();
+  summaries.unshift({ id, title: campaign.title, mode: campaign.mode, updatedAt: now });
+  saveSummaries(summaries);
+  setActiveCampaignId(id);
   return id;
 }
 
-export function saveCampaign(campaign: Campaign): void {
-  const list = loadCampaignsRaw().filter(c => c.id !== campaign.id);
-  const summary: CampaignSummary = {
-    id: campaign.id,
-    title: campaign.setup.title,
-    mode: campaign.setup.length,
-    setup: campaign.setup as unknown as AdventureOptions,
-    createdAt: campaign.createdAt,
-    updatedAt: campaign.updatedAt,
-  };
-  list.unshift(summary);
-  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(list));
-  localStorage.setItem(`dm_campaign_${campaign.id}`, JSON.stringify(campaign));
+export function loadCampaign(id: string): StoredCampaign | null {
+  return safeParse<StoredCampaign>(localStorage.getItem(`dm_campaign_${id}`));
 }
 
-export function loadCampaign(id: string): Campaign | null {
-  return safeParse<Campaign>(localStorage.getItem(`dm_campaign_${id}`));
+export function saveCampaign(campaign: StoredCampaign): void {
+  campaign.updatedAt = new Date().toISOString();
+  localStorage.setItem(`dm_campaign_${campaign.id}`, JSON.stringify(campaign));
+  const summaries = loadSummaries().filter(s => s.id !== campaign.id);
+  summaries.unshift({ id: campaign.id, title: campaign.title, mode: campaign.mode, updatedAt: campaign.updatedAt });
+  saveSummaries(summaries);
 }
 
 export function deleteCampaign(id: string): void {
-  const list = loadCampaignsRaw().filter(c => c.id !== id);
-  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(list));
   localStorage.removeItem(`dm_campaign_${id}`);
+  saveSummaries(loadSummaries().filter(s => s.id !== id));
+  if (getActiveCampaignId() === id) clearActiveCampaign();
+}
+
+/** Append a structured event (dice roll, combat, etc.) to a campaign's event log */
+export function appendEvent(campaignId: string, event: CampaignEvent): void {
+  const campaign = loadCampaign(campaignId);
+  if (!campaign) return;
+  campaign.events.push(event);
+  saveCampaign(campaign);
 }
 
 // ─── Character ───────────────────────────────────────────────────────────────
@@ -105,4 +145,15 @@ export function loadCharacter(): Character | null {
 }
 export function clearCharacter(): void {
   localStorage.removeItem(CHARACTER_KEY);
+}
+
+// ─── Session (tab-scoped) ────────────────────────────────────────────────────
+export function saveSession(data: unknown): void {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(data));
+}
+export function loadSession<T>(): T | null {
+  return safeParse<T>(sessionStorage.getItem(SESSION_KEY));
+}
+export function clearSession(): void {
+  sessionStorage.removeItem(SESSION_KEY);
 }
