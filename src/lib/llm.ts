@@ -1,7 +1,7 @@
 /**
  * llm.ts — Thin provider abstraction for browser-direct LLM calls.
  * Supports OpenAI-compatible APIs, Anthropic, Google Gemini, OpenRouter,
- * and custom OpenAI-compatible endpoints.
+ * Groq, and custom OpenAI-compatible endpoints.
  *
  * CRITICAL CONTRACT:
  *   streamCompletion guarantees exactly one terminal call:
@@ -10,6 +10,12 @@
  *
  *   This means callers (dm.ts) will always receive the text that was
  *   streamed even if the connection drops mid-response.
+ *
+ * FREE-TIER PROVIDERS (recommended when Gemini is overloaded):
+ *   Groq   — provider: 'groq',  models: llama-3.3-70b-versatile (best),
+ *                                        llama-3.1-8b-instant (fastest),
+ *                                        mixtral-8x7b-32768 (long ctx)
+ *             Get a free key at: https://console.groq.com
  */
 
 import type { Message, LLMConfig } from '../types';
@@ -31,6 +37,12 @@ export async function streamCompletion(
       case 'openai':
         await openaiCompatibleStream(
           'https://api.openai.com/v1/chat/completions',
+          config, apiKey, messages, trackingChunk, signal,
+        );
+        break;
+      case 'groq':
+        await openaiCompatibleStream(
+          'https://api.groq.com/openai/v1/chat/completions',
           config, apiKey, messages, trackingChunk, signal,
         );
         break;
@@ -73,7 +85,7 @@ export async function streamCompletion(
 }
 
 // ---------------------------------------------------------------------------
-// OpenAI-compatible (OpenAI, OpenRouter, custom)
+// OpenAI-compatible (OpenAI, Groq, OpenRouter, custom)
 // ---------------------------------------------------------------------------
 
 async function openaiCompatibleStream(
@@ -184,11 +196,13 @@ async function googleStream(
     }))
   );
 
+  // Only include thinkingConfig for models that support it (gemini-2.5+)
   const body: Record<string, unknown> = {
     contents,
     generationConfig: {
       maxOutputTokens: config.maxTokens ?? 8192,
       temperature: config.temperature ?? 0.9,
+      ...(model.startsWith('gemini-2.5') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
     },
   };
 

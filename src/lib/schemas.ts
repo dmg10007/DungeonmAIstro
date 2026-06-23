@@ -7,6 +7,7 @@ export const LLMProvider = z.enum([
   'openai',
   'anthropic',
   'google',
+  'groq',
   'openrouter',
   'custom',
 ]);
@@ -143,7 +144,12 @@ export const campaignStateSchema = z.object({
   characters: z.array(characterSchema),
   events: z.array(campaignEventSchema),
   messages: z.array(z.object({
-    role: z.enum(['user', 'assistant', 'system']),
+    // 'event' messages are display-only (dice rolls, local game events).
+    // They must be filtered out before saveCampaign is called so they are
+    // never persisted to storage or sent to any LLM API.
+    // The enum includes 'event' here only so Zod does not reject the array
+    // if a caller accidentally passes one through — storage.ts strips them.
+    role: z.enum(['user', 'assistant', 'system', 'event']),
     content: z.string().max(32000),
     timestamp: z.string().datetime(),
   })),
