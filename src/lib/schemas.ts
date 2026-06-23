@@ -111,6 +111,10 @@ export const adventureOptionsSchema = z.object({
   desiredLength: z.string().min(1).max(100),
   settingPrompt: z.string().max(4000),
   safetyMode: z.enum(['strict', 'balanced']),
+  /** 1 = By the Book (strict RAW), 3 = Balanced (default), 5 = Rule of Cool */
+  rulesStrictness: z.number().int().min(1).max(5).default(3),
+  /** 1 = Pure Narrative (minimal dice), 3 = Balanced (default), 5 = Dice Heavy */
+  narrativeStyle: z.number().int().min(1).max(5).default(3),
 });
 export type AdventureOptions = z.infer<typeof adventureOptionsSchema>;
 

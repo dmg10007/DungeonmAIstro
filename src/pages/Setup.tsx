@@ -11,6 +11,22 @@ const LENGTHS: Record<string, string> = {
   'Full campaign (10+ sessions)': 'full_campaign',
 };
 
+const RULES_LABELS: Record<number, { label: string; description: string }> = {
+  1: { label: 'By the Book', description: 'Strict RAW — all 5e rules enforced accurately. Misunderstandings corrected gently but precisely.' },
+  2: { label: 'Mostly RAW', description: 'Rules as written with minor common-table rulings allowed.' },
+  3: { label: 'Balanced', description: 'Rules as intended — bent for fun when it doesn\'t break balance.' },
+  4: { label: 'Flexible', description: 'Rules are guidelines. Player agency and narrative take priority.' },
+  5: { label: 'Rule of Cool', description: 'Anything goes if it\'s dramatic and fun. Rules are suggestions.' },
+};
+
+const NARRATIVE_LABELS: Record<number, { label: string; description: string }> = {
+  1: { label: 'Pure Narrative', description: 'Cinematic outcomes. Dice called only for high-stakes moments.' },
+  2: { label: 'Story-first', description: 'Mostly narrative with occasional mechanical checks.' },
+  3: { label: 'Balanced', description: 'Mix of vivid description and tactical dice rolls.' },
+  4: { label: 'Dice-leaning', description: 'Frequent skill checks and saves alongside rich narration.' },
+  5: { label: 'Dice Heavy', description: 'Lean into the mechanical game — skill checks, saving throws, contested rolls throughout.' },
+};
+
 export default function Setup() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<'one_shot' | 'campaign'>('one_shot');
@@ -20,6 +36,8 @@ export default function Setup() {
   const [desiredLength, setDesiredLength] = useState(Object.keys(LENGTHS)[0]);
   const [settingPrompt, setSettingPrompt] = useState('');
   const [safetyMode, setSafetyMode] = useState<'strict' | 'balanced'>('balanced');
+  const [rulesStrictness, setRulesStrictness] = useState(3);
+  const [narrativeStyle, setNarrativeStyle] = useState(3);
   const [error, setError] = useState<string | null>(null);
 
   function toggleTone(t: string) {
@@ -28,7 +46,7 @@ export default function Setup() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const options = { mode, playerCount, experienceLevel, tone, desiredLength, settingPrompt, safetyMode };
+    const options = { mode, playerCount, experienceLevel, tone, desiredLength, settingPrompt, safetyMode, rulesStrictness, narrativeStyle };
     const parsed = adventureOptionsSchema.safeParse(options);
     if (!parsed.success) { setError(parsed.error.errors[0].message); return; }
     const title = settingPrompt.slice(0, 60) || `${mode === 'one_shot' ? 'One-shot' : 'Campaign'} — ${new Date().toLocaleDateString()}`;
@@ -96,6 +114,50 @@ export default function Setup() {
           <select id="length" className="input" value={desiredLength} onChange={e => setDesiredLength(e.target.value)}>
             {Object.keys(LENGTHS).map(l => <option key={l} value={l}>{l}</option>)}
           </select>
+        </div>
+
+        {/* Rules Strictness slider */}
+        <div>
+          <label htmlFor="rulesStrictness" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
+            <span>Rules Strictness</span>
+            <span style={{ color: 'var(--color-primary)' }}>{RULES_LABELS[rulesStrictness].label}</span>
+          </label>
+          <input
+            id="rulesStrictness"
+            type="range" min={1} max={5} step={1}
+            value={rulesStrictness}
+            onChange={e => setRulesStrictness(Number(e.target.value))}
+            style={{ width: '100%', accentColor: 'var(--color-primary)' }}
+            aria-valuetext={RULES_LABELS[rulesStrictness].label}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-1)' }}>
+            <span>By the Book</span><span>Rule of Cool</span>
+          </div>
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
+            {RULES_LABELS[rulesStrictness].description}
+          </p>
+        </div>
+
+        {/* Narrative Style slider */}
+        <div>
+          <label htmlFor="narrativeStyle" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
+            <span>Narrative Style</span>
+            <span style={{ color: 'var(--color-primary)' }}>{NARRATIVE_LABELS[narrativeStyle].label}</span>
+          </label>
+          <input
+            id="narrativeStyle"
+            type="range" min={1} max={5} step={1}
+            value={narrativeStyle}
+            onChange={e => setNarrativeStyle(Number(e.target.value))}
+            style={{ width: '100%', accentColor: 'var(--color-primary)' }}
+            aria-valuetext={NARRATIVE_LABELS[narrativeStyle].label}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-1)' }}>
+            <span>Pure Narrative</span><span>Dice Heavy</span>
+          </div>
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
+            {NARRATIVE_LABELS[narrativeStyle].description}
+          </p>
         </div>
 
         {/* Custom prompt */}
