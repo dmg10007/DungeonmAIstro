@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import DiceRoller from '../components/DiceRoller';
 import CombatTracker from '../components/CombatTracker';
 import { getActiveCampaignId, loadCampaign, appendEvent } from '../lib/storage';
@@ -9,17 +10,40 @@ import type { DiceRollResult } from '../lib/schemas';
 
 interface Message { role: 'user' | 'assistant'; content: string; timestamp: string; }
 
-// ── Markdown-lite renderer (bold, italic, blockquote, no XSS) ────────────────
+const RULES_LABELS: Record<number, string> = {
+  1: 'By the Book',
+  2: 'Mostly RAW',
+  3: 'Balanced',
+  4: 'Flexible',
+  5: 'Rule of Cool',
+};
+
+const NARRATIVE_LABELS: Record<number, string> = {
+  1: 'Pure Narrative',
+  2: 'Story-first',
+  3: 'Balanced',
+  4: 'Dice-leaning',
+  5: 'Dice Heavy',
+};
+
 function renderMarkdown(text: string): string {
-  return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  const html = escaped
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
     .replace(/\n/g, '<br />');
+
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['strong', 'em', 'blockquote', 'br'],
+    ALLOWED_ATTR: [],
+  });
 }
 
-// ── Passphrase modal ──────────────────────────────────────────────────────────
 function PassphraseModal({ onSubmit, onCancel, error }: {
   onSubmit: (p: string) => void;
   onCancel: () => void;
@@ -64,7 +88,6 @@ function PassphraseModal({ onSubmit, onCancel, error }: {
   );
 }
 
-// ── Main Play page ────────────────────────────────────────────────────────────
 export default function Play() {
   const navigate = useNavigate();
   const campaignId = getActiveCampaignId();
@@ -93,6 +116,9 @@ export default function Play() {
 
   const vaultEntries = listVaultEntries();
   const hasKey = vaultEntries.length > 0;
+
+  const rulesLabel = useMemo(() => RULES_LABELS[campaign?.options.rulesStrictness ?? 3], [campaign?.options.rulesStrictness]);
+  const narrativeLabel = useMemo(() => NARRATIVE_LABELS[campaign?.options.narrativeStyle ?? 3], [campaign?.options.narrativeStyle]);
 
   if (!campaign) {
     return (
@@ -146,6 +172,17 @@ export default function Play() {
     setShowPassphrase(true);
   }
 
+  function handleOpenScene() {
+    if (loading || !hasKey) return;
+    if (passphraseRef.current) {
+      doSend('__OPEN_SCENE__', passphraseRef.current);
+      return;
+    }
+    setPendingInput('__OPEN_SCENE__');
+    setPassphraseError(null);
+    setShowPassphrase(true);
+  }
+
   function handlePassphraseSubmit(passphrase: string) {
     passphraseRef.current = passphrase;
     setShowPassphrase(false);
@@ -179,14 +216,13 @@ export default function Play() {
         display: 'grid', gridTemplateColumns: '1fr 320px', gap: 'var(--space-6)',
         height: 'calc(100dvh - 64px)', boxSizing: 'border-box',
       }}>
-
-        {/* Chat pane */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', paddingBottom: 'var(--space-3)', borderBottom: '1px solid var(--color-divider)', flexWrap: 'wrap' }}>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-lg)', color: 'var(--color-primary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {campaign.title}
             </h1>
             <span className="badge">{campaign.options.mode === 'one_shot' ? 'One-shot' : 'Campaign'}</span>
+            <button className="btn btn-gold" onClick={handleOpenScene} disabled={!hasKey || loading}>Open Scene</button>
           </div>
 
           {!hasKey && (
@@ -217,7 +253,8 @@ export default function Play() {
             {messages.length === 0 && !streamingText && (
               <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 'var(--space-16) var(--space-8)' }}>
                 <div style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-2)' }}>Your adventure awaits</div>
-                <p style={{ fontSize: 'var(--text-sm)' }}>Type a message to begin. The Dungeon Master is ready.</p>
+                <p style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--space-4)' }}>Type a message or open the first scene to begin.</p>
+                <button className="btn btn-primary" onClick={handleOpenScene} disabled={!hasKey || loading}>Start with the opening scene</button>
               </div>
             )}
 
@@ -233,7 +270,7 @@ export default function Play() {
                     border: m.role === 'assistant' ? '1px solid var(--color-border)' : 'none',
                     fontSize: 'var(--text-sm)', wordBreak: 'break-word', lineHeight: 1.6,
                   }}
-                  dangerouslySetInnerHTML={{ __html: m.role === 'assistant' ? renderMarkdown(m.content) : m.content }}
+                  dangerouslySetInnerHTML={{ __html: m.role === 'assistant' ? renderMarkdown(m.content) : DOMPurify.sanitize(m.content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }) }}
                 />
               </div>
             ))}
@@ -248,16 +285,17 @@ export default function Play() {
                     background: 'var(--color-surface)', border: '1px solid var(--color-border)',
                     fontSize: 'var(--text-sm)', wordBreak: 'break-word', lineHeight: 1.6,
                   }}
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(streamingText) + '<span style="opacity:0.5">&#9646;</span>' }}
+                  dangerouslySetInnerHTML={{ __html: `${renderMarkdown(streamingText)}<span style="opacity:0.5">&#9646;</span>` }}
                 />
               </div>
             )}
 
             {loading && !streamingText && (
-              <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)' }}>
                 <div style={{ padding: 'var(--space-3) var(--space-4)', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
                   The DM is thinking<span style={{ animation: 'blink 1s step-start infinite' }}>...</span>
                 </div>
+                <button className="btn btn-ghost" onClick={() => abortRef.current?.abort()}>Cancel</button>
               </div>
             )}
             <div ref={bottomRef} />
@@ -279,7 +317,6 @@ export default function Play() {
           </div>
         </div>
 
-        {/* Right panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', overflowY: 'auto' }}>
           <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <button className={`btn ${panel === 'dice' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setPanel(p => p === 'dice' ? null : 'dice')}>Dice</button>
@@ -310,6 +347,8 @@ export default function Play() {
             <div>Mode: {campaign.options.mode === 'one_shot' ? 'One-shot' : 'Campaign'}</div>
             <div>Tone: {campaign.options.tone.join(', ')}</div>
             <div>Experience: {campaign.options.experienceLevel}</div>
+            <div>Rules: {rulesLabel}</div>
+            <div>Narrative: {narrativeLabel}</div>
             <div>Safety: {campaign.options.safetyMode}</div>
             <button className="btn btn-ghost" style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', padding: 'var(--space-1) var(--space-2)' }} onClick={() => navigate('/setup')}>New Adventure</button>
           </div>

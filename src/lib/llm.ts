@@ -1,7 +1,7 @@
 /**
- * llm.ts — Thin provider abstraction for OpenAI, Anthropic, Google Gemini.
- * All calls go directly from the browser to the provider API using the
- * user's own key retrieved from the encrypted vault.
+ * llm.ts — Thin provider abstraction for browser-direct LLM calls.
+ * Supports OpenAI-compatible APIs, Anthropic, Google Gemini, OpenRouter,
+ * and custom OpenAI-compatible endpoints.
  */
 
 import type { Message, LLMConfig } from '../types';
@@ -12,16 +12,53 @@ export async function streamCompletion(
   messages: Message[],
   onChunk: (text: string) => void,
   onDone: () => void,
-  onError: (err: Error) => void
+  onError: (err: Error) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   try {
     switch (config.provider) {
       case 'openai':
-        return await openaiStream(config, apiKey, messages, onChunk, onDone);
+        return await openaiCompatibleStream(
+          'https://api.openai.com/v1/chat/completions',
+          config,
+          apiKey,
+          messages,
+          onChunk,
+          onDone,
+          signal,
+        );
+      case 'openrouter':
+        return await openaiCompatibleStream(
+          'https://openrouter.ai/api/v1/chat/completions',
+          config,
+          apiKey,
+          messages,
+          onChunk,
+          onDone,
+          signal,
+          {
+            'HTTP-Referer': window.location.origin,
+            'X-Title': 'DungeonmAIstro',
+          },
+        );
+      case 'custom': {
+        const baseUrl = config.baseUrl?.trim();
+        if (!baseUrl) throw new Error('Custom provider requires a baseUrl.');
+        const endpoint = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
+        return await openaiCompatibleStream(
+          endpoint,
+          config,
+          apiKey,
+          messages,
+          onChunk,
+          onDone,
+          signal,
+        );
+      }
       case 'anthropic':
-        return await anthropicStream(config, apiKey, messages, onChunk, onDone);
+        return await anthropicStream(config, apiKey, messages, onChunk, onDone, signal);
       case 'google':
-        return await googleStream(config, apiKey, messages, onChunk, onDone);
+        return await googleStream(config, apiKey, messages, onChunk, onDone, signal);
       default:
         throw new Error(`Unknown provider: ${config.provider}`);
     }
@@ -30,17 +67,24 @@ export async function streamCompletion(
   }
 }
 
-// ─── OpenAI ──────────────────────────────────────────────────────────────────
-async function openaiStream(
+async function openaiCompatibleStream(
+  endpoint: string,
   config: LLMConfig,
   apiKey: string,
   messages: Message[],
   onChunk: (t: string) => void,
-  onDone: () => void
+  onDone: () => void,
+  signal?: AbortSignal,
+  extraHeaders?: Record<string, string>,
 ) {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      ...extraHeaders,
+    },
     body: JSON.stringify({
       model: config.model,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -49,22 +93,23 @@ async function openaiStream(
       stream: true,
     }),
   });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
-  await readSSE(res, onChunk, onDone, (d) => d?.choices?.[0]?.delta?.content ?? '');
+  if (!res.ok) throw new Error(`OpenAI-compatible ${res.status}: ${await res.text()}`);
+  await readSSE(res, onChunk, onDone, (d) => d?.choices?.[0]?.delta?.content ?? '', signal);
 }
 
-// ─── Anthropic ───────────────────────────────────────────────────────────────
 async function anthropicStream(
   config: LLMConfig,
   apiKey: string,
   messages: Message[],
   onChunk: (t: string) => void,
-  onDone: () => void
+  onDone: () => void,
+  signal?: AbortSignal,
 ) {
   const system = messages.find((m) => m.role === 'system')?.content ?? '';
   const convo = messages.filter((m) => m.role !== 'system');
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
@@ -80,16 +125,16 @@ async function anthropicStream(
     }),
   });
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
-  await readSSE(res, onChunk, onDone, (d) => d?.delta?.text ?? '');
+  await readSSE(res, onChunk, onDone, (d) => d?.delta?.text ?? '', signal);
 }
 
-// ─── Google Gemini ───────────────────────────────────────────────────────────
 async function googleStream(
   config: LLMConfig,
   apiKey: string,
   messages: Message[],
   onChunk: (t: string) => void,
-  onDone: () => void
+  onDone: () => void,
+  signal?: AbortSignal,
 ) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:streamGenerateContent?key=${apiKey}&alt=sse`;
   const contents = messages
@@ -97,35 +142,64 @@ async function googleStream(
     .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
   const res = await fetch(url, {
     method: 'POST',
+    signal,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents, generationConfig: { maxOutputTokens: config.maxTokens, temperature: config.temperature } }),
+    body: JSON.stringify({
+      contents,
+      generationConfig: {
+        maxOutputTokens: config.maxTokens,
+        temperature: config.temperature,
+      },
+    }),
   });
   if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
-  await readSSE(res, onChunk, onDone, (d) => d?.candidates?.[0]?.content?.parts?.[0]?.text ?? '');
+  await readSSE(res, onChunk, onDone, (d) => d?.candidates?.[0]?.content?.parts?.[0]?.text ?? '', signal);
 }
 
-// ─── SSE reader ──────────────────────────────────────────────────────────────
 async function readSSE(
   res: Response,
   onChunk: (t: string) => void,
   onDone: () => void,
-  extract: (d: any) => string // eslint-disable-line @typescript-eslint/no-explicit-any
+  extract: (d: any) => string,
+  signal?: AbortSignal,
 ) {
-  const reader = res.body!.getReader();
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('Streaming response body unavailable.');
+
   const decoder = new TextDecoder();
   let buf = '';
+
   while (true) {
+    if (signal?.aborted) {
+      try { await reader.cancel(); } catch { /* noop */ }
+      return;
+    }
+
     const { done, value } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const payload = line.slice(6).trim();
-      if (payload === '[DONE]') { onDone(); return; }
-      try { const text = extract(JSON.parse(payload)); if (text) onChunk(text); } catch { /* skip */ }
+    const chunks = buf.split('\n\n');
+    buf = chunks.pop() ?? '';
+
+    for (const chunk of chunks) {
+      const lines = chunk.split('\n').map((line) => line.trim());
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload) continue;
+        if (payload === '[DONE]') {
+          onDone();
+          return;
+        }
+        try {
+          const text = extract(JSON.parse(payload));
+          if (text) onChunk(text);
+        } catch {
+          /* skip malformed chunk */
+        }
+      }
     }
   }
-  onDone();
+
+  if (!signal?.aborted) onDone();
 }
