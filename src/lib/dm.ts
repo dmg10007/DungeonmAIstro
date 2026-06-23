@@ -11,7 +11,7 @@
 
 import { streamCompletion } from './llm';
 import { getActiveCampaignId, loadCampaign, saveCampaign } from './storage';
-import { listVaultEntries, decryptKey } from './vault';
+import { listVaultEntries, retrieveApiKey } from './vault';
 import type { Message } from '../types';
 
 const OPEN_SCENE_SENTINEL = '__OPEN_SCENE__';
@@ -151,19 +151,23 @@ export async function sendToDM(
     return;
   }
 
-  // 2. Retrieve and decrypt API key
+  // 2. Retrieve and decrypt API key using vault's actual API
   const entries = listVaultEntries();
   if (entries.length === 0) {
     onError('No API key found. Add one in Settings.');
     return;
   }
-  // Use the first (most recently added) entry
+  // Use the first unexpired entry
   const entry = entries[0];
-  let apiKey: string;
+  let apiKey: string | null = null;
   try {
-    apiKey = await decryptKey(entry.id, passphrase);
+    apiKey = await retrieveApiKey(passphrase, entry.provider, entry.label);
   } catch {
-    onError('Incorrect passphrase or expired key. Please re-enter your vault passphrase.');
+    onError('Incorrect passphrase or corrupted vault. Please re-enter your vault passphrase.');
+    return;
+  }
+  if (!apiKey) {
+    onError('API key expired or not found. Please re-add it in Settings.');
     return;
   }
 
@@ -184,7 +188,7 @@ export async function sendToDM(
   let accumulated = '';
 
   await streamCompletion(
-    entry.config,
+    { provider: entry.provider, model: entry.model },
     apiKey,
     messages,
     (chunk) => {
