@@ -2,6 +2,14 @@
  * llm.ts — Thin provider abstraction for browser-direct LLM calls.
  * Supports OpenAI-compatible APIs, Anthropic, Google Gemini, OpenRouter,
  * and custom OpenAI-compatible endpoints.
+ *
+ * CRITICAL CONTRACT:
+ *   streamCompletion guarantees exactly one terminal call:
+ *   - onDone(accumulated)  — on clean finish OR partial stream with content
+ *   - onError(err)         — on hard errors with zero content accumulated
+ *
+ *   This means callers (dm.ts) will always receive the text that was
+ *   streamed even if the connection drops mid-response.
  */
 
 import type { Message, LLMConfig } from '../types';
@@ -11,61 +19,67 @@ export async function streamCompletion(
   apiKey: string,
   messages: Message[],
   onChunk: (text: string) => void,
-  onDone: () => void,
+  onDone: (accumulated: string) => void,
   onError: (err: Error) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  // Each inner stream function accumulates text and returns it.
+  // streamCompletion then calls onDone(text) or onError depending on outcome.
+  let accumulated = '';
+  const trackingChunk = (t: string) => { accumulated += t; onChunk(t); };
+
   try {
     switch (config.provider) {
       case 'openai':
-        return await openaiCompatibleStream(
+        await openaiCompatibleStream(
           'https://api.openai.com/v1/chat/completions',
-          config,
-          apiKey,
-          messages,
-          onChunk,
-          onDone,
-          signal,
+          config, apiKey, messages, trackingChunk, signal,
         );
+        break;
       case 'openrouter':
-        return await openaiCompatibleStream(
+        await openaiCompatibleStream(
           'https://openrouter.ai/api/v1/chat/completions',
-          config,
-          apiKey,
-          messages,
-          onChunk,
-          onDone,
-          signal,
-          {
-            'HTTP-Referer': window.location.origin,
-            'X-Title': 'DungeonmAIstro',
-          },
+          config, apiKey, messages, trackingChunk, signal,
+          { 'HTTP-Referer': window.location.origin, 'X-Title': 'DungeonmAIstro' },
         );
+        break;
       case 'custom': {
         const baseUrl = config.baseUrl?.trim();
         if (!baseUrl) throw new Error('Custom provider requires a baseUrl.');
-        const endpoint = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-        return await openaiCompatibleStream(
-          endpoint,
-          config,
-          apiKey,
-          messages,
-          onChunk,
-          onDone,
-          signal,
+        await openaiCompatibleStream(
+          `${baseUrl.replace(/\/$/, '')}/chat/completions`,
+          config, apiKey, messages, trackingChunk, signal,
         );
+        break;
       }
       case 'anthropic':
-        return await anthropicStream(config, apiKey, messages, onChunk, onDone, signal);
+        await anthropicStream(config, apiKey, messages, trackingChunk, signal);
+        break;
       case 'google':
-        return await googleStream(config, apiKey, messages, onChunk, onDone, signal);
+        await googleStream(config, apiKey, messages, trackingChunk, signal);
+        break;
       default:
         throw new Error(`Unknown provider: ${(config as LLMConfig).provider}`);
     }
+
+    if (!signal?.aborted) onDone(accumulated);
+
   } catch (err) {
-    onError(err instanceof Error ? err : new Error(String(err)));
+    if (signal?.aborted) return; // user cancelled — no callback
+
+    // If we already streamed some content, surface it rather than swallowing it.
+    // This handles partial 503s where Gemini sends tokens then errors.
+    if (accumulated.length > 0) {
+      onDone(accumulated);
+    } else {
+      onError(err instanceof Error ? err : new Error(String(err)));
+    }
   }
 }
+
+// ---------------------------------------------------------------------------
+// OpenAI-compatible (OpenAI, OpenRouter, custom)
+// ---------------------------------------------------------------------------
 
 async function openaiCompatibleStream(
   endpoint: string,
@@ -73,7 +87,6 @@ async function openaiCompatibleStream(
   apiKey: string,
   messages: Message[],
   onChunk: (t: string) => void,
-  onDone: () => void,
   signal?: AbortSignal,
   extraHeaders?: Record<string, string>,
 ) {
@@ -93,16 +106,22 @@ async function openaiCompatibleStream(
       stream: true,
     }),
   });
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-  await readOpenAISSE(res, onChunk, onDone, signal);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status}: ${extractApiErrorMessage(body, res.status)}`);
+  }
+  await readOpenAISSE(res, onChunk, signal);
 }
+
+// ---------------------------------------------------------------------------
+// Anthropic
+// ---------------------------------------------------------------------------
 
 async function anthropicStream(
   config: LLMConfig,
   apiKey: string,
   messages: Message[],
   onChunk: (t: string) => void,
-  onDone: () => void,
   signal?: AbortSignal,
 ) {
   const system = messages.find((m) => m.role === 'system')?.content ?? '';
@@ -124,27 +143,33 @@ async function anthropicStream(
       stream: true,
     }),
   });
-  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
-  await readOpenAISSE(res, onChunk, onDone, signal, (d) => d?.delta?.text ?? '');
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Anthropic ${res.status}: ${extractApiErrorMessage(body, res.status)}`);
+  }
+  await readOpenAISSE(res, onChunk, signal, (d) => (d as { delta?: { text?: string } })?.delta?.text ?? '');
 }
+
+// ---------------------------------------------------------------------------
+// Google Gemini
+// ---------------------------------------------------------------------------
 
 /**
  * Google Gemini streaming via the v1beta REST API.
  *
  * Key differences from OpenAI:
- * - Auth goes in the x-goog-api-key header (NOT the URL query param)
+ * - Auth goes in x-goog-api-key header (NOT the URL query param)
  * - System prompt goes in systemInstruction, not the messages array
- * - Assistant role is called 'model', not 'assistant'
+ * - Assistant role is 'model', not 'assistant'
  * - Response shape: candidates[0].content.parts[0].text
- * - The stream does NOT send a [DONE] sentinel — it just ends
- * - alt=sse tells the API to use Server-Sent Events format
+ * - Stream does NOT send [DONE] — it just ends
+ * - alt=sse uses Server-Sent Events format
  */
 async function googleStream(
   config: LLMConfig,
   apiKey: string,
   messages: Message[],
   onChunk: (t: string) => void,
-  onDone: () => void,
   signal?: AbortSignal,
 ) {
   const model = config.model || 'gemini-2.0-flash';
@@ -153,7 +178,6 @@ async function googleStream(
   const systemContent = messages.find((m) => m.role === 'system')?.content;
   const convo = messages.filter((m) => m.role !== 'system');
 
-  // Gemini requires alternating user/model turns — merge consecutive same-role messages
   const contents = mergeGeminiTurns(
     convo.map((m) => ({
       role: m.role === 'assistant' ? 'model' : 'user',
@@ -184,16 +208,16 @@ async function googleStream(
   });
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Gemini ${res.status}: ${errText}`);
+    const body = await res.text();
+    throw new Error(`Gemini ${res.status}: ${extractApiErrorMessage(body, res.status)}`);
   }
 
-  await readGeminiSSE(res, onChunk, onDone, signal);
+  await readGeminiSSE(res, onChunk, signal);
 }
 
 /**
  * Gemini requires strictly alternating user/model turns.
- * If the history has consecutive same-role messages, merge them.
+ * Merge consecutive same-role messages and ensure the first turn is 'user'.
  */
 function mergeGeminiTurns(
   turns: { role: string; parts: { text: string }[] }[]
@@ -207,18 +231,20 @@ function mergeGeminiTurns(
       merged.push({ role: turn.role, parts: [...turn.parts] });
     }
   }
-  // Gemini requires the first turn to be 'user'
   if (merged.length > 0 && merged[0].role !== 'user') {
-    merged.unshift({ role: 'user', parts: [{ text: '(start)' }] });
+    merged.unshift({ role: 'user', parts: [{ text: '(begin)' }] });
   }
   return merged;
 }
 
-/** Parse OpenAI-style SSE: data: {...} lines, terminated by data: [DONE] */
+// ---------------------------------------------------------------------------
+// SSE readers — DO NOT call onDone here; streamCompletion owns that call
+// ---------------------------------------------------------------------------
+
+/** OpenAI-style SSE: `data: {...}` lines, terminated by `data: [DONE]` */
 async function readOpenAISSE(
   res: Response,
   onChunk: (t: string) => void,
-  onDone: () => void,
   signal?: AbortSignal,
   extract: (d: unknown) => string = (d: unknown) =>
     (d as { choices?: { delta?: { content?: string } }[] })?.choices?.[0]?.delta?.content ?? '',
@@ -230,7 +256,7 @@ async function readOpenAISSE(
 
   try {
     while (true) {
-      if (signal?.aborted) { await reader.cancel(); return; }
+      if (signal?.aborted) { reader.cancel(); return; }
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
@@ -241,27 +267,26 @@ async function readOpenAISSE(
           const l = line.trim();
           if (!l.startsWith('data:')) continue;
           const payload = l.slice(5).trim();
-          if (!payload || payload === '[DONE]') { if (payload === '[DONE]') { onDone(); return; } continue; }
-          try { const t = extract(JSON.parse(payload)); if (t) onChunk(t); } catch { /* skip */ }
+          if (!payload || payload === '[DONE]') continue;
+          try { const t = extract(JSON.parse(payload)); if (t) onChunk(t); } catch { /* skip malformed */ }
         }
       }
     }
   } finally {
     try { reader.releaseLock(); } catch { /* noop */ }
   }
-  if (!signal?.aborted) onDone();
 }
 
 /**
  * Gemini SSE parser.
- * Same line format as OpenAI (data: {...}) but:
- * - Never sends [DONE] — stream just ends
- * - Text is at candidates[0].content.parts[0].text
+ * Same `data: {...}` line format as OpenAI but:
+ * - No [DONE] sentinel — stream just closes
+ * - Text at candidates[0].content.parts[0].text
+ * - Embedded errors at .error.message
  */
 async function readGeminiSSE(
   res: Response,
   onChunk: (t: string) => void,
-  onDone: () => void,
   signal?: AbortSignal,
 ) {
   const reader = res.body?.getReader();
@@ -271,7 +296,7 @@ async function readGeminiSSE(
 
   try {
     while (true) {
-      if (signal?.aborted) { await reader.cancel(); return; }
+      if (signal?.aborted) { reader.cancel(); return; }
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
@@ -285,13 +310,14 @@ async function readGeminiSSE(
           if (!payload) continue;
           try {
             const json = JSON.parse(payload);
-            // Handle API-level errors embedded in the stream
-            if (json.error) throw new Error(`Gemini stream error: ${json.error.message ?? JSON.stringify(json.error)}`);
+            if (json.error) {
+              throw new Error(`Gemini stream error: ${json.error.message ?? JSON.stringify(json.error)}`);
+            }
             const text: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
             if (text) onChunk(text);
           } catch (e) {
             if (e instanceof Error && e.message.startsWith('Gemini stream error')) throw e;
-            /* skip malformed chunk */
+            /* skip other malformed chunks */
           }
         }
       }
@@ -299,5 +325,24 @@ async function readGeminiSSE(
   } finally {
     try { reader.releaseLock(); } catch { /* noop */ }
   }
-  if (!signal?.aborted) onDone();
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Extract a human-readable message from a JSON or plain-text API error body. */
+function extractApiErrorMessage(body: string, status: number): string {
+  try {
+    const j = JSON.parse(body);
+    return (
+      j?.error?.message ??
+      j?.message ??
+      j?.error ??
+      (status === 503 ? 'Service temporarily unavailable — the model may be overloaded. Try again in a moment.' : body)
+    );
+  } catch {
+    if (status === 503) return 'Service temporarily unavailable — the model may be overloaded. Try again in a moment.';
+    return body.slice(0, 300);
+  }
 }

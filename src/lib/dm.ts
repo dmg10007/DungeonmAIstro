@@ -1,5 +1,5 @@
 /**
- * dm.ts - Dungeon Master orchestration layer.
+ * dm.ts — Dungeon Master orchestration layer.
  *
  * Pulls the active campaign + characters from storage, decrypts the stored
  * API key using the caller-supplied passphrase, builds a rich system prompt,
@@ -41,19 +41,19 @@ function buildSystemPrompt(campaign: ReturnType<typeof loadCampaign>): string {
       : 'The player is experienced. Use full D&D terminology freely.';
 
   const rulesGuide = [
-    'By the Book - follow RAW strictly',
-    'Mostly RAW - minor narrative flexibility',
-    'Balanced - equal story and rules',
-    'Flexible - story over rules when needed',
-    'Rule of Cool - narrative and dramatic moments first',
+    'By the Book — follow RAW strictly',
+    'Mostly RAW — minor narrative flexibility',
+    'Balanced — equal story and rules',
+    'Flexible — story over rules when needed',
+    'Rule of Cool — narrative and dramatic moments first',
   ][options.rulesStrictness - 1];
 
   const narrativeGuide = [
-    'Pure Narrative - roleplay and story only, minimize dice',
-    'Story-first - narrative leads, dice punctuate key moments',
-    'Balanced - story and dice equally important',
-    'Dice-leaning - dice outcomes drive the narrative',
-    'Dice Heavy - dice govern most outcomes, minimal narrative override',
+    'Pure Narrative — roleplay and story only, minimize dice',
+    'Story-first — narrative leads, dice punctuate key moments',
+    'Balanced — story and dice equally important',
+    'Dice-leaning — dice outcomes drive the narrative',
+    'Dice Heavy — dice govern most outcomes, minimal narrative override',
   ][options.narrativeStyle - 1];
 
   const toneDesc = options.tone.join(', ');
@@ -78,7 +78,7 @@ function buildSystemPrompt(campaign: ReturnType<typeof loadCampaign>): string {
     `You are the Dungeon Master for a D&D 5e ${options.mode === 'one_shot' ? 'one-shot' : 'campaign'} titled "${title}".`,
     '',
     '## Your Role',
-    'You are a highly skilled, creative, and adaptive DM. You narrate the world vividly, voice NPCs with personality, adjudicate rules fairly, track all dice rolls and outcomes, and guide the player through an engaging story. You are the sole narrator -- never break the fourth wall unless explaining a mechanic to a new player.',
+    'You are a highly skilled, creative, and adaptive DM. You narrate the world vividly, voice NPCs with personality, adjudicate rules fairly, track all dice rolls and outcomes, and guide the player through an engaging story. You are the sole narrator — never break the fourth wall unless explaining a mechanic to a new player.',
     '',
     '## Adventure Mode',
     modeNote,
@@ -111,7 +111,7 @@ function buildSystemPrompt(campaign: ReturnType<typeof loadCampaign>): string {
     '## Response Style',
     '- Use **bold** for important names, places, and mechanics.',
     '- Use *italics* for atmosphere, whispered speech, or internal sensations.',
-    '- Keep responses focused and immersive. Avoid walls of text -- break long descriptions into paragraphs.',
+    '- Keep responses focused and immersive. Avoid walls of text — break long descriptions into paragraphs.',
     '- End most responses with an implicit or explicit prompt for the player to act.',
   ]
     .filter((l) => l !== null)
@@ -141,23 +141,13 @@ export async function sendToDM(
 ): Promise<void> {
   // 1. Load campaign
   const campaignId = getActiveCampaignId();
-  if (!campaignId) {
-    onError('No active campaign. Start a new adventure first.');
-    return;
-  }
+  if (!campaignId) { onError('No active campaign. Start a new adventure first.'); return; }
   const campaign = loadCampaign(campaignId);
-  if (!campaign) {
-    onError('Campaign data not found. Please start a new adventure.');
-    return;
-  }
+  if (!campaign) { onError('Campaign data not found. Please start a new adventure.'); return; }
 
-  // 2. Retrieve and decrypt API key using vault's actual API
+  // 2. Decrypt API key
   const entries = listVaultEntries();
-  if (entries.length === 0) {
-    onError('No API key found. Add one in Settings.');
-    return;
-  }
-  // Use the first unexpired entry
+  if (entries.length === 0) { onError('No API key found. Add one in Settings.'); return; }
   const entry = entries[0];
   let apiKey: string | null = null;
   try {
@@ -166,17 +156,13 @@ export async function sendToDM(
     onError('Incorrect passphrase or corrupted vault. Please re-enter your vault passphrase.');
     return;
   }
-  if (!apiKey) {
-    onError('API key expired or not found. Please re-add it in Settings.');
-    return;
-  }
+  if (!apiKey) { onError('API key expired or not found. Please re-add it in Settings.'); return; }
 
-  // 3. Build conversation history
+  // 3. Build messages
   const systemPrompt = buildSystemPrompt(campaign);
   const isOpenScene = userInput.trim() === OPEN_SCENE_SENTINEL;
   const actualUserMessage = isOpenScene ? buildOpenScenePrompt(campaign) : userInput.trim();
 
-  // Replay existing history (excluding any previous system messages we injected)
   const history: Message[] = campaign.messages.filter((m) => m.role !== 'system');
   const messages: Message[] = [
     { role: 'system', content: systemPrompt, timestamp: new Date().toISOString() },
@@ -184,35 +170,30 @@ export async function sendToDM(
     { role: 'user', content: actualUserMessage, timestamp: new Date().toISOString() },
   ];
 
-  // 4. Stream response, accumulating full text for storage
-  let accumulated = '';
-
+  // 4. Stream — llm.ts now owns accumulation and guarantees onDone(fullText) or onError
   await streamCompletion(
     { provider: entry.provider, model: entry.model },
     apiKey,
     messages,
-    (chunk) => {
-      accumulated += chunk;
-      onChunk(chunk);
-    },
-    () => {
-      // Persist the exchange (store raw sentinel for user msg in history if open scene)
+    onChunk,
+    (fullText) => {
+      // Persist the exchange
       const updatedMessages: Message[] = [
         ...campaign.messages.filter((m) => m.role !== 'system'),
         { role: 'user', content: userInput, timestamp: new Date().toISOString() },
-        { role: 'assistant', content: accumulated, timestamp: new Date().toISOString() },
+        { role: 'assistant', content: fullText, timestamp: new Date().toISOString() },
       ];
       saveCampaign({ ...campaign, messages: updatedMessages });
-      onDone(accumulated);
+      onDone(fullText);
     },
     (err) => {
       const msg = err.message ?? String(err);
       if (msg.includes('401') || msg.toLowerCase().includes('unauthorized')) {
-        onError('API key rejected (401 Unauthorized). Check your key in Settings.');
+        onError('API key rejected (401). Check your key in Settings.');
       } else if (msg.includes('429')) {
         onError('Rate limit reached (429). Wait a moment and try again.');
-      } else if (msg.includes('AbortError') || msg.includes('abort')) {
-        // User cancelled -- silently ignore
+      } else if (msg.includes('503') || msg.toLowerCase().includes('overloaded') || msg.toLowerCase().includes('unavailable')) {
+        onError('Gemini is temporarily overloaded (503). Wait a moment and try again.');
       } else {
         onError(`DM error: ${msg}`);
       }
