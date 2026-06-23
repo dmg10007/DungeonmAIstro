@@ -9,7 +9,7 @@ import Settings from './pages/Settings';
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <NavBar />
       <main style={{ minHeight: '100dvh', paddingTop: 'var(--space-16)' }}>
         <Routes>
