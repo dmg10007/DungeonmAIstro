@@ -1,148 +1,218 @@
 /**
- * dm.ts — DM Orchestrator
+ * dm.ts - Dungeon Master orchestration layer.
  *
- * Responsibilities:
- * 1. Retrieve + decrypt the user’s API key from the vault
- * 2. Build the system prompt via systemPrompt.ts
- * 3. Window the conversation to stay within token budget
- * 4. Call llm.ts streamCompletion
- * 5. Persist each turn to the active campaign via storage.ts
+ * Pulls the active campaign + characters from storage, decrypts the stored
+ * API key using the caller-supplied passphrase, builds a rich system prompt,
+ * then streams the LLM response back via callbacks.
  *
- * Security:
- * - The decrypted API key is held in a local variable for the duration of
- *   the async call and then GC’d. It is never written to storage or state.
- * - PBKDF2 key derivation happens inside WebCrypto (vault.ts).
+ * The __OPEN_SCENE__ sentinel triggers a special opening-narration prompt
+ * instead of echoing the raw sentinel text to the user or the LLM.
  */
 
-import { retrieveApiKey, listVaultEntries } from './vault';
-import { buildSystemPrompt } from './systemPrompt';
 import { streamCompletion } from './llm';
-import { loadCampaign, saveCampaign, getActiveCampaignId } from './storage';
-import type { StoredCampaign } from './storage';
-import type { LLMConfig, Message } from '../types';
+import { getActiveCampaignId, loadCampaign, saveCampaign } from './storage';
+import { listVaultEntries, decryptKey } from './vault';
+import type { Message } from '../types';
 
-// Approximate token budget: keep last N chars of history (rough 4 chars/token)
-// Reserve ~2000 tokens for system prompt + new response
-const MAX_HISTORY_CHARS = 24_000; // ~6000 tokens of history
+const OPEN_SCENE_SENTINEL = '__OPEN_SCENE__';
 
-/** Result returned to the UI layer */
-export interface DMSendResult {
-  aborted: boolean;
+function buildSystemPrompt(campaign: ReturnType<typeof loadCampaign>): string {
+  if (!campaign) return '';
+
+  const { options, characters, title } = campaign;
+
+  const partyDesc =
+    characters.length > 0
+      ? characters
+          .map(
+            (c) =>
+              `- ${c.characterName} (${c.race} ${c.class}, Level ${c.level}, Background: ${c.background})`,
+          )
+          .join('\n')
+      : '- No characters registered yet (treat as a solo adventurer of unspecified origin).';
+
+  const experienceGuide =
+    options.experienceLevel === 'new'
+      ? 'The player is BRAND NEW to D&D. Explain mechanics clearly as they arise, use simple language, avoid jargon without definition, and be encouraging and patient.'
+      : options.experienceLevel === 'beginner'
+      ? 'The player has some D&D experience but may need reminders on rules. Explain non-obvious mechanics briefly.'
+      : options.experienceLevel === 'intermediate'
+      ? 'The player is comfortable with D&D rules. Assume working knowledge; only explain unusual rulings.'
+      : 'The player is experienced. Use full D&D terminology freely.';
+
+  const rulesGuide = [
+    'By the Book - follow RAW strictly',
+    'Mostly RAW - minor narrative flexibility',
+    'Balanced - equal story and rules',
+    'Flexible - story over rules when needed',
+    'Rule of Cool - narrative and dramatic moments first',
+  ][options.rulesStrictness - 1];
+
+  const narrativeGuide = [
+    'Pure Narrative - roleplay and story only, minimize dice',
+    'Story-first - narrative leads, dice punctuate key moments',
+    'Balanced - story and dice equally important',
+    'Dice-leaning - dice outcomes drive the narrative',
+    'Dice Heavy - dice govern most outcomes, minimal narrative override',
+  ][options.narrativeStyle - 1];
+
+  const toneDesc = options.tone.join(', ');
+
+  const safetyNote =
+    options.safetyMode === 'family'
+      ? 'Content must be family-friendly. No graphic violence, adult themes, or horror.'
+      : options.safetyMode === 'balanced'
+      ? 'Keep content PG-13. Dramatic tension and mild peril are fine; avoid graphic or explicit content.'
+      : 'Adult-oriented content is permitted if dramatically appropriate and player-initiated.';
+
+  const modeNote =
+    options.mode === 'one_shot'
+      ? 'This is a ONE-SHOT adventure. It must have a clear beginning, middle, and end completable in a single session (roughly 2-4 hours of play). Build toward a satisfying climax.'
+      : 'This is a multi-session CAMPAIGN. Build an evolving world with persistent consequences, recurring characters, and escalating stakes.';
+
+  const promptNote = options.customPrompt
+    ? `\nThe player requested this specific adventure premise: "${options.customPrompt}"\nBuild the campaign directly around this premise.`
+    : '';
+
+  return [
+    `You are the Dungeon Master for a D&D 5e ${options.mode === 'one_shot' ? 'one-shot' : 'campaign'} titled "${title}".`,
+    '',
+    '## Your Role',
+    'You are a highly skilled, creative, and adaptive DM. You narrate the world vividly, voice NPCs with personality, adjudicate rules fairly, track all dice rolls and outcomes, and guide the player through an engaging story. You are the sole narrator -- never break the fourth wall unless explaining a mechanic to a new player.',
+    '',
+    '## Adventure Mode',
+    modeNote,
+    promptNote,
+    '',
+    '## Party',
+    partyDesc,
+    '',
+    '## Player Experience',
+    experienceGuide,
+    '',
+    '## Tone',
+    `The desired tone is: ${toneDesc}. Lean into these qualities in your descriptions, NPC dialogue, and scene-setting.`,
+    '',
+    '## Rules Approach',
+    rulesGuide,
+    '',
+    '## Narrative vs Dice Balance',
+    narrativeGuide,
+    '',
+    '## Safety',
+    safetyNote,
+    '',
+    '## Mechanics to Track',
+    '- When a dice roll is required, call it out explicitly: e.g. "Roll a DC 14 Perception check."',
+    '- When the player reports a roll result, incorporate it into the narrative outcome.',
+    '- Track HP, conditions, and resources mentioned by the player.',
+    '- For combat, describe initiative order and enemy actions clearly.',
+    '',
+    '## Response Style',
+    '- Use **bold** for important names, places, and mechanics.',
+    '- Use *italics* for atmosphere, whispered speech, or internal sensations.',
+    '- Keep responses focused and immersive. Avoid walls of text -- break long descriptions into paragraphs.',
+    '- End most responses with an implicit or explicit prompt for the player to act.',
+  ]
+    .filter((l) => l !== null)
+    .join('\n');
 }
 
-/**
- * Send a user message to the DM and stream the response.
- *
- * @param userText      The player’s message
- * @param passphrase    The vault passphrase (collected in-UI, never stored)
- * @param onChunk       Called with each streamed text fragment
- * @param onDone        Called when the stream completes successfully
- * @param onError       Called with a user-friendly error string
- * @param signal        AbortSignal for component unmount / cancel
- */
-export async function sendToDM(
-  userText: string,
-  passphrase: string,
-  onChunk: (text: string) => void,
-  onDone: (fullText: string) => void,
-  onError: (msg: string) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  // ── 1. Load campaign ─────────────────────────────────────────────────────────
-  const campaignId = getActiveCampaignId();
-  const campaign: StoredCampaign | null = campaignId ? loadCampaign(campaignId) : null;
-  if (!campaign) { onError('No active campaign found. Please start a new adventure.'); return; }
-
-  // ── 2. Decrypt API key ─────────────────────────────────────────────────
-  const entries = listVaultEntries();
-  if (entries.length === 0) { onError('No API key configured. Add one in Settings.'); return; }
-  const entry = entries[0]; // Use first non-expired key
-  const apiKey = await retrieveApiKey(passphrase, entry.provider, entry.label);
-  if (!apiKey) {
-    onError('Incorrect passphrase or the key has expired. Check Settings.');
-    return;
-  }
-
-  if (signal?.aborted) return;
-
-  // ── 3. Build messages array ───────────────────────────────────────────────
-  const systemMsg: Message = {
-    role: 'system',
-    content: buildSystemPrompt(campaign),
-    timestamp: new Date().toISOString(),
-  };
-
-  // Window history to stay within token budget
-  const history = campaign.messages.filter(m => m.role !== 'system');
-  const windowed = windowHistory(history, MAX_HISTORY_CHARS);
-
-  const userMsg: Message = {
-    role: 'user',
-    content: userText.trim(),
-    timestamp: new Date().toISOString(),
-  };
-
-  const messages: Message[] = [systemMsg, ...windowed, userMsg];
-
-  // ── 4. LLM config ───────────────────────────────────────────────────────────
-  const llmConfig: LLMConfig = {
-    provider: entry.provider as LLMConfig['provider'],
-    model: entry.model,
-    maxTokens: 1024,
-    temperature: 0.85,
-  };
-
-  // ── 5. Stream ────────────────────────────────────────────────────────────────
-  let fullText = '';
-
-  await streamCompletion(
-    llmConfig,
-    apiKey,
-    messages,
-    (chunk) => {
-      if (signal?.aborted) return;
-      fullText += chunk;
-      onChunk(chunk);
-    },
-    () => {
-      if (signal?.aborted) return;
-      // ── 6. Persist both turns to campaign ─────────────────────────────
-      const latest = loadCampaign(campaignId!);
-      if (latest) {
-        latest.messages.push(
-          { role: 'user', content: userMsg.content, timestamp: userMsg.timestamp },
-          { role: 'assistant', content: fullText, timestamp: new Date().toISOString() },
-        );
-        saveCampaign(latest);
-      }
-      onDone(fullText);
-    },
-    (err) => {
-      onError(friendlyError(err));
-    },
+function buildOpenScenePrompt(campaign: ReturnType<typeof loadCampaign>): string {
+  if (!campaign) return 'Begin the adventure with a compelling opening scene.';
+  const { options } = campaign;
+  const promptHint = options.customPrompt
+    ? ` The player requested: "${options.customPrompt}".`
+    : '';
+  return (
+    `Begin the adventure now. Open with a vivid, immersive scene that immediately draws the player into the world.` +
+    ` The tone should be ${options.tone.join(', ')}.${promptHint}` +
+    ` End the opening scene with a clear hook or decision point for the player.`
   );
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Keep the most recent messages that fit within the char budget */
-function windowHistory(messages: Message[], maxChars: number): Message[] {
-  let total = 0;
-  const result: Message[] = [];
-  for (let i = messages.length - 1; i >= 0; i--) {
-    total += messages[i].content.length;
-    if (total > maxChars) break;
-    result.unshift(messages[i]);
+export async function sendToDM(
+  userInput: string,
+  passphrase: string,
+  onChunk: (chunk: string) => void,
+  onDone: (fullText: string) => void,
+  onError: (message: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  // 1. Load campaign
+  const campaignId = getActiveCampaignId();
+  if (!campaignId) {
+    onError('No active campaign. Start a new adventure first.');
+    return;
   }
-  return result;
-}
+  const campaign = loadCampaign(campaignId);
+  if (!campaign) {
+    onError('Campaign data not found. Please start a new adventure.');
+    return;
+  }
 
-/** Map raw errors to user-friendly strings */
-function friendlyError(err: Error): string {
-  const msg = err.message ?? '';
-  if (msg.includes('401') || msg.includes('403')) return 'API key rejected by provider. Check your key in Settings.';
-  if (msg.includes('429')) return 'Rate limit hit. Wait a moment and try again.';
-  if (msg.includes('500') || msg.includes('502') || msg.includes('503')) return 'Provider is having issues. Try again in a moment.';
-  if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) return 'Network error. Check your internet connection.';
-  return `DM error: ${msg.slice(0, 120)}`;
+  // 2. Retrieve and decrypt API key
+  const entries = listVaultEntries();
+  if (entries.length === 0) {
+    onError('No API key found. Add one in Settings.');
+    return;
+  }
+  // Use the first (most recently added) entry
+  const entry = entries[0];
+  let apiKey: string;
+  try {
+    apiKey = await decryptKey(entry.id, passphrase);
+  } catch {
+    onError('Incorrect passphrase or expired key. Please re-enter your vault passphrase.');
+    return;
+  }
+
+  // 3. Build conversation history
+  const systemPrompt = buildSystemPrompt(campaign);
+  const isOpenScene = userInput.trim() === OPEN_SCENE_SENTINEL;
+  const actualUserMessage = isOpenScene ? buildOpenScenePrompt(campaign) : userInput.trim();
+
+  // Replay existing history (excluding any previous system messages we injected)
+  const history: Message[] = campaign.messages.filter((m) => m.role !== 'system');
+  const messages: Message[] = [
+    { role: 'system', content: systemPrompt, timestamp: new Date().toISOString() },
+    ...history,
+    { role: 'user', content: actualUserMessage, timestamp: new Date().toISOString() },
+  ];
+
+  // 4. Stream response, accumulating full text for storage
+  let accumulated = '';
+
+  await streamCompletion(
+    entry.config,
+    apiKey,
+    messages,
+    (chunk) => {
+      accumulated += chunk;
+      onChunk(chunk);
+    },
+    () => {
+      // Persist the exchange (store raw sentinel for user msg in history if open scene)
+      const updatedMessages: Message[] = [
+        ...campaign.messages.filter((m) => m.role !== 'system'),
+        { role: 'user', content: userInput, timestamp: new Date().toISOString() },
+        { role: 'assistant', content: accumulated, timestamp: new Date().toISOString() },
+      ];
+      saveCampaign({ ...campaign, messages: updatedMessages });
+      onDone(accumulated);
+    },
+    (err) => {
+      const msg = err.message ?? String(err);
+      if (msg.includes('401') || msg.toLowerCase().includes('unauthorized')) {
+        onError('API key rejected (401 Unauthorized). Check your key in Settings.');
+      } else if (msg.includes('429')) {
+        onError('Rate limit reached (429). Wait a moment and try again.');
+      } else if (msg.includes('AbortError') || msg.includes('abort')) {
+        // User cancelled -- silently ignore
+      } else {
+        onError(`DM error: ${msg}`);
+      }
+    },
+    signal,
+  );
 }
