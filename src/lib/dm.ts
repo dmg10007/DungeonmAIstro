@@ -5,6 +5,12 @@
  * API key using the caller-supplied passphrase, builds a rich system prompt,
  * then streams the LLM response back via callbacks.
  *
+ * RAG: before building the final system prompt, the user query is used to
+ * retrieve the top-5 most relevant chunks from the local IndexedDB knowledge
+ * base (uploaded PDFs). These are injected as a ## Rules & Lore Reference
+ * section. Retrieval is skipped silently if the knowledge base is empty or
+ * if the embedding call fails.
+ *
  * The __OPEN_SCENE__ sentinel triggers a special opening-narration prompt
  * instead of echoing the raw sentinel text to the user or the LLM.
  */
@@ -12,11 +18,12 @@
 import { streamCompletion } from './llm';
 import { getActiveCampaignId, loadCampaign, saveCampaign } from './storage';
 import { listVaultEntries, retrieveApiKey } from './vault';
+import { retrieveContext, hasKnowledge } from './knowledge';
 import type { Message } from '../types';
 
 const OPEN_SCENE_SENTINEL = '__OPEN_SCENE__';
 
-function buildSystemPrompt(campaign: ReturnType<typeof loadCampaign>): string {
+function buildSystemPrompt(campaign: ReturnType<typeof loadCampaign>, rulesContext: string): string {
   if (!campaign) return '';
 
   const { options, characters, title } = campaign;
@@ -72,7 +79,7 @@ function buildSystemPrompt(campaign: ReturnType<typeof loadCampaign>): string {
     ? `\nThe player requested this specific adventure premise: "${options.customPrompt}"\nBuild the campaign directly around this premise.`
     : '';
 
-  return [
+  const sections = [
     `You are the Dungeon Master for a D&D 5e ${options.mode === 'one_shot' ? 'one-shot' : 'campaign'} titled "${title}".`,
     '',
     '## Your Role',
@@ -111,9 +118,14 @@ function buildSystemPrompt(campaign: ReturnType<typeof loadCampaign>): string {
     '- Use *italics* for atmosphere, whispered speech, or internal sensations.',
     '- Keep responses focused and immersive. Avoid walls of text — break long descriptions into paragraphs.',
     '- End most responses with an implicit or explicit prompt for the player to act.',
-  ]
-    .filter((l) => l !== null)
-    .join('\n');
+  ];
+
+  // Inject retrieved knowledge context if available
+  if (rulesContext.trim()) {
+    sections.push('', rulesContext);
+  }
+
+  return sections.filter((l) => l !== null).join('\n');
 }
 
 function buildOpenScenePrompt(campaign: ReturnType<typeof loadCampaign>): string {
@@ -156,10 +168,27 @@ export async function sendToDM(
   }
   if (!apiKey) { onError('API key expired or not found. Please re-add it in Settings.'); return; }
 
-  // 3. Build messages
+  const baseUrl = (entry as { baseUrl?: string }).baseUrl;
+
+  // 3. RAG retrieval — silently skip if knowledge base is empty or errors
+  let rulesContext = '';
+  try {
+    const kb = await hasKnowledge();
+    if (kb) {
+      const query = userInput === OPEN_SCENE_SENTINEL
+        ? `D&D 5e opening scene: ${campaign.options.tone.join(', ')} tone`
+        : userInput;
+      rulesContext = await retrieveContext(query, apiKey, entry.provider, baseUrl);
+    }
+  } catch {
+    // RAG failure must never break the game — continue without context
+    rulesContext = '';
+  }
+
+  // 4. Build messages
   // Filter out 'system' and 'event' roles — 'event' messages are display-only
   // (dice rolls, local game events) and must never be sent to the LLM API.
-  const systemPrompt = buildSystemPrompt(campaign);
+  const systemPrompt = buildSystemPrompt(campaign, rulesContext);
   const isOpenScene = userInput.trim() === OPEN_SCENE_SENTINEL;
   const actualUserMessage = isOpenScene ? buildOpenScenePrompt(campaign) : userInput.trim();
 
@@ -172,7 +201,7 @@ export async function sendToDM(
     { role: 'user', content: actualUserMessage, timestamp: new Date().toISOString() },
   ];
 
-  // 4. Stream — llm.ts now owns accumulation and guarantees onDone(fullText) or onError
+  // 5. Stream — llm.ts now owns accumulation and guarantees onDone(fullText) or onError
   await streamCompletion(
     { provider: entry.provider, model: entry.model },
     apiKey,
@@ -195,7 +224,7 @@ export async function sendToDM(
       } else if (msg.includes('429')) {
         onError('Rate limit reached (429). Wait a moment and try again.');
       } else if (msg.includes('503') || msg.toLowerCase().includes('overloaded') || msg.toLowerCase().includes('unavailable')) {
-        onError('Gemini is temporarily overloaded (503). Wait a moment and try again.');
+        onError('The model is temporarily overloaded (503). Wait a moment and try again.');
       } else {
         onError(`DM error: ${msg}`);
       }

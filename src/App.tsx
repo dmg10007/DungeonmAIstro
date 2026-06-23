@@ -6,6 +6,7 @@ import CharacterLab from './pages/CharacterLab';
 import Play from './pages/Play';
 import Combat from './pages/Combat';
 import Settings from './pages/Settings';
+import KnowledgeBase from './pages/KnowledgeBase';
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/characters" element={<CharacterLab />} />
           <Route path="/play" element={<Play />} />
           <Route path="/combat" element={<Combat />} />
+          <Route path="/knowledge" element={<KnowledgeBase />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
