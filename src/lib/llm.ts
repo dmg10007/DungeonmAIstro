@@ -166,8 +166,10 @@ async function anthropicStream(
  * - Response shape: candidates[0].content.parts[0].text
  * - Stream does NOT send [DONE] — it just ends
  * - alt=sse uses Server-Sent Events format
- * - thinkingBudget: 0 disables hidden thinking tokens for narrative calls,
- *   eliminating ~872 wasted tokens and the associated latency overhead.
+ *
+ * thinkingConfig / thinkingBudget is only supported on gemini-2.5+ models.
+ * Sending it to gemini-2.0-flash or earlier returns a 400 'Unknown name
+ * thinkingConfig' error, so it is gated on the model string below.
  */
 async function googleStream(
   config: LLMConfig,
@@ -197,14 +199,15 @@ async function googleStream(
       maxOutputTokens: config.maxTokens ?? 8192,
       temperature: config.temperature ?? 0.9,
     },
-    // Disable hidden chain-of-thought for narrative DM responses.
-    // Thinking tokens (thinkingBudget > 0) add latency and token cost with
-    // no benefit for storytelling. Re-enable selectively for rules-lookup
-    // calls if a dedicated adjudication endpoint is added in future.
-    thinkingConfig: {
-      thinkingBudget: 0,
-    },
   };
+
+  // thinkingConfig is only valid for gemini-2.5+ models.
+  // Setting thinkingBudget: 0 disables hidden chain-of-thought tokens,
+  // reducing latency and cost for narrative DM responses. Do not send
+  // this field at all for gemini-2.0 or earlier — it causes a 400 error.
+  if (model.startsWith('gemini-2.5')) {
+    body.thinkingConfig = { thinkingBudget: 0 };
+  }
 
   if (systemContent) {
     body.systemInstruction = { parts: [{ text: systemContent }] };
