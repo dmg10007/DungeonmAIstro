@@ -1,11 +1,11 @@
 /**
- * classTraits.ts — Class features (levels 1–3) and background features for D&D 5e
+ * classTraits.ts - Class features (levels 1-3) and background features for D&D 5e
  *
  * Data sourced from the 5e Basic Rules / SRD.
  * Used in CharacterLab to show a collapsible "Class & Background Traits" panel.
  */
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------------------
 
 export interface ClassFeature {
   level: 1 | 2 | 3;
@@ -18,7 +18,7 @@ export interface BackgroundFeature {
   description: string;
 }
 
-// ─── Class Features (Levels 1–3) ─────────────────────────────────────────────
+// --- Class Features (Levels 1-3) ---------------------------------------------
 
 export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
   Barbarian: [
@@ -44,7 +44,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 2,
       name: 'Danger Sense',
       description:
-        'You gain an uncanny sense of when things nearby aren't as they should be, giving you advantage on Dexterity saving throws against effects you can see — such as traps and spells. You must not be blinded, deafened, or incapacitated to gain this benefit.',
+        "You gain an uncanny sense of when things nearby aren't as they should be, giving you advantage on Dexterity saving throws against effects you can see -- such as traps and spells. You must not be blinded, deafened, or incapacitated to gain this benefit.",
     },
     {
       level: 3,
@@ -65,13 +65,13 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 1,
       name: 'Bardic Inspiration',
       description:
-        'You can inspire others through stirring words or music. As a bonus action choose one creature other than yourself within 60 feet that can hear you. That creature gains a Bardic Inspiration die — a d6. Once within the next 10 minutes the creature can add the die to one ability check, attack roll, or saving throw. You can use this feature a number of times equal to your Charisma modifier (minimum once) and regain uses on a long rest.',
+        'You can inspire others through stirring words or music. As a bonus action choose one creature other than yourself within 60 feet that can hear you. That creature gains a Bardic Inspiration die -- a d6. Once within the next 10 minutes the creature can add the die to one ability check, attack roll, or saving throw. You can use this feature a number of times equal to your Charisma modifier (minimum once) and regain uses on a long rest.',
     },
     {
       level: 2,
       name: 'Jack of All Trades',
       description:
-        'You can add half your proficiency bonus (rounded down) to any ability check that doesn't already include your proficiency bonus.',
+        "You can add half your proficiency bonus (rounded down) to any ability check that doesn't already include your proficiency bonus.",
     },
     {
       level: 2,
@@ -89,7 +89,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 3,
       name: 'Expertise',
       description:
-        'Choose two of your skill proficiencies or one skill and your proficiency with thieves' tools. Your proficiency bonus is doubled for any ability check you make using those proficiencies.',
+        "Choose two of your skill proficiencies or one skill and your proficiency with thieves' tools. Your proficiency bonus is doubled for any ability check you make using those proficiencies.",
     },
   ],
 
@@ -104,7 +104,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 1,
       name: 'Divine Domain',
       description:
-        'Choose one domain related to your deity — such as Life, Light, War, Knowledge, Nature, Tempest, or Trickery. Your choice grants you domain spells and other features at 1st, 2nd, 6th, 8th, and 17th levels.',
+        'Choose one domain related to your deity -- such as Life, Light, War, Knowledge, Nature, Tempest, or Trickery. Your choice grants you domain spells and other features at 1st, 2nd, 6th, 8th, and 17th levels.',
     },
     {
       level: 2,
@@ -131,7 +131,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 1,
       name: 'Druidic',
       description:
-        'You know Druidic, the secret language of druids. You can speak the language and use it to leave hidden messages. Others spot that a message has been written with a DC 15 Perception check but can't decipher it without knowing the language.',
+        "You know Druidic, the secret language of druids. You can speak the language and use it to leave hidden messages. Others spot that a message has been written with a DC 15 Perception check but can't decipher it without knowing the language.",
     },
     {
       level: 1,
@@ -143,13 +143,13 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 2,
       name: 'Wild Shape',
       description:
-        'Starting at 2nd level you can use your action to magically assume the shape of a beast you have seen before. You can use this feature twice and regain uses on a short or long rest. At 2nd level you can transform into a beast with a challenge rating of 1/4 or lower that doesn't have a flying or swimming speed.',
+        "Starting at 2nd level you can use your action to magically assume the shape of a beast you have seen before. You can use this feature twice and regain uses on a short or long rest. At 2nd level you can transform into a beast with a challenge rating of 1/4 or lower that doesn't have a flying or swimming speed.",
     },
     {
       level: 2,
       name: 'Druid Circle',
       description:
-        'At 2nd level you choose to identify with a circle of druids — Circle of the Land or Circle of the Moon. Your choice grants you features at 2nd, 6th, 10th, and 14th levels.',
+        'At 2nd level you choose to identify with a circle of druids -- Circle of the Land or Circle of the Moon. Your choice grants you features at 2nd, 6th, 10th, and 14th levels.',
     },
     {
       level: 3,
@@ -164,7 +164,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 1,
       name: 'Fighting Style',
       description:
-        'You adopt a particular style of fighting as your specialty: Archery, Defense, Dueling, Great Weapon Fighting, Protection, or Two-Weapon Fighting. You can't take the same Fighting Style option more than once, even if you later get to choose again.',
+        "You adopt a particular style of fighting as your specialty: Archery, Defense, Dueling, Great Weapon Fighting, Protection, or Two-Weapon Fighting. You can't take the same Fighting Style option more than once, even if you later get to choose again.",
     },
     {
       level: 1,
@@ -236,7 +236,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 1,
       name: 'Lay on Hands',
       description:
-        'Your blessed touch can heal wounds. You have a pool of healing power totaling 5 × your paladin level hit points. As an action you can touch a creature and restore any number of hit points to it from this pool. Alternatively you can spend 5 hit points to cure one disease or neutralize one poison.',
+        'Your blessed touch can heal wounds. You have a pool of healing power totaling 5 x your paladin level hit points. As an action you can touch a creature and restore any number of hit points to it from this pool. Alternatively you can spend 5 hit points to cure one disease or neutralize one poison.',
     },
     {
       level: 2,
@@ -254,7 +254,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 2,
       name: 'Divine Smite',
       description:
-        'When you hit a creature with a melee weapon attack you can expend one paladin spell slot to deal radiant damage to the target, in addition to the weapon's damage. The extra damage is 2d8 for a 1st-level spell slot, plus 1d8 for each spell level higher than 1st (max 5d8). Undead or fiends take an extra 1d8 damage.',
+        "When you hit a creature with a melee weapon attack you can expend one paladin spell slot to deal radiant damage to the target, in addition to the weapon's damage. The extra damage is 2d8 for a 1st-level spell slot, plus 1d8 for each spell level higher than 1st (max 5d8). Undead or fiends take an extra 1d8 damage.",
     },
     {
       level: 3,
@@ -281,7 +281,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 1,
       name: 'Natural Explorer',
       description:
-        'You are particularly familiar with one type of natural environment and are adept at traveling and surviving in such regions. Choose one type of favored terrain. When you make an Intelligence or Wisdom check related to your favored terrain your proficiency bonus is doubled. Difficult terrain doesn't slow your group's travel, and you can't become lost except by magical means.',
+        "You are particularly familiar with one type of natural environment and are adept at traveling and surviving in such regions. Choose one type of favored terrain. When you make an Intelligence or Wisdom check related to your favored terrain your proficiency bonus is doubled. Difficult terrain doesn't slow your group's travel, and you can't become lost except by magical means.",
     },
     {
       level: 2,
@@ -314,19 +314,19 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 1,
       name: 'Expertise',
       description:
-        'At 1st level choose two of your skill proficiencies or one skill and your proficiency with thieves' tools. Your proficiency bonus is doubled for any ability check you make with those proficiencies. At 6th level choose two more.',
+        "At 1st level choose two of your skill proficiencies or one skill and your proficiency with thieves' tools. Your proficiency bonus is doubled for any ability check you make with those proficiencies. At 6th level choose two more.",
     },
     {
       level: 1,
       name: 'Sneak Attack',
       description:
-        'Beginning at 1st level you know how to strike subtly and exploit a foe's distraction. Once per turn you can deal an extra 1d6 damage to one creature you hit with an attack if you have advantage on the attack roll or if another enemy of the target is adjacent to it. The extra damage increases as you gain levels.',
+        "Beginning at 1st level you know how to strike subtly and exploit a foe's distraction. Once per turn you can deal an extra 1d6 damage to one creature you hit with an attack if you have advantage on the attack roll or if another enemy of the target is adjacent to it. The extra damage increases as you gain levels.",
     },
     {
       level: 1,
       name: "Thieves' Cant",
       description:
-        'During your rogue training you learned thieves' cant, a secret mix of dialect, jargon, and code that allows you to hide messages in seemingly normal conversation. It takes four times longer to convey such a message, but others who know the cant understand the message.',
+        "During your rogue training you learned thieves' cant, a secret mix of dialect, jargon, and code that allows you to hide messages in seemingly normal conversation. It takes four times longer to convey such a message, but others who know the cant understand the message.",
     },
     {
       level: 2,
@@ -386,7 +386,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
       level: 2,
       name: 'Eldritch Invocations',
       description:
-        'In your study of occult lore you have unearthed eldritch invocations — fragments of forbidden knowledge that imbue you with an abiding magical ability. You gain two invocations of your choice. Examples include Agonizing Blast (add Charisma to eldritch blast damage), Armor of Shadows (Mage Armor at will), and Devil's Sight (see in magical darkness).',
+        'In your study of occult lore you have unearthed eldritch invocations -- fragments of forbidden knowledge that imbue you with an abiding magical ability. You gain two invocations of your choice. Examples include Agonizing Blast (add Charisma to eldritch blast damage), Armor of Shadows (Mage Armor at will), and Devil\'s Sight (see in magical darkness).',
     },
     {
       level: 3,
@@ -424,7 +424,7 @@ export const CLASS_FEATURES: Record<string, ClassFeature[]> = {
   ],
 };
 
-// ─── Background Features ──────────────────────────────────────────────────────
+// --- Background Features -----------------------------------------------------
 
 export const BACKGROUND_FEATURES: Record<string, BackgroundFeature> = {
   Acolyte: {
@@ -445,7 +445,7 @@ export const BACKGROUND_FEATURES: Record<string, BackgroundFeature> = {
   Entertainer: {
     name: 'By Popular Demand',
     description:
-      'You can always find a place to perform, usually in an inn or tavern but possibly with a circus, at a theater, or even in a noble's court. At such a place you receive free lodging and food of a modest or comfortable standard (depending on the quality of the establishment), as long as you perform each night. In addition your performance makes you something of a local figure.',
+      "You can always find a place to perform, usually in an inn or tavern but possibly with a circus, at a theater, or even in a noble's court. At such a place you receive free lodging and food of a modest or comfortable standard (depending on the quality of the establishment), as long as you perform each night. In addition your performance makes you something of a local figure.",
   },
   'Folk Hero': {
     name: 'Rustic Hospitality',
@@ -460,7 +460,7 @@ export const BACKGROUND_FEATURES: Record<string, BackgroundFeature> = {
   Hermit: {
     name: 'Discovery',
     description:
-      'The quiet seclusion of your extended hermitage gave you access to a unique and powerful discovery. The exact nature of this revelation is up to you and your DM — it might be a great truth about the cosmos, the gods, the powerful forces of nature, or the forces of good and evil.',
+      'The quiet seclusion of your extended hermitage gave you access to a unique and powerful discovery. The exact nature of this revelation is up to you and your DM -- it might be a great truth about the cosmos, the gods, the powerful forces of nature, or the forces of good and evil.',
   },
   Noble: {
     name: 'Position of Privilege',
@@ -480,7 +480,7 @@ export const BACKGROUND_FEATURES: Record<string, BackgroundFeature> = {
   Sailor: {
     name: "Ship's Passage",
     description:
-      'When you need to, you can secure free passage on a sailing ship for yourself and your adventuring companions. You might sail on the ship you served on, or another ship you have good relations with. Because you\'re calling in a favor, you can't be certain of a schedule or route that will meet your every need. In return, you are expected to assist the crew during the voyage.',
+      "When you need to, you can secure free passage on a sailing ship for yourself and your adventuring companions. You might sail on the ship you served on, or another ship you have good relations with. Because you're calling in a favor, you can't be certain of a schedule or route that will meet your every need. In return, you are expected to assist the crew during the voyage.",
   },
   Soldier: {
     name: 'Military Rank',
@@ -494,7 +494,7 @@ export const BACKGROUND_FEATURES: Record<string, BackgroundFeature> = {
   },
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------------------
 
 /** Returns all features for a class at or below the given level. */
 export function getClassFeaturesUpToLevel(
