@@ -59,11 +59,9 @@ function buildSystemPrompt(campaign: ReturnType<typeof loadCampaign>): string {
   const toneDesc = options.tone.join(', ');
 
   const safetyNote =
-    options.safetyMode === 'family'
+    options.safetyMode === 'strict'
       ? 'Content must be family-friendly. No graphic violence, adult themes, or horror.'
-      : options.safetyMode === 'balanced'
-      ? 'Keep content PG-13. Dramatic tension and mild peril are fine; avoid graphic or explicit content.'
-      : 'Adult-oriented content is permitted if dramatically appropriate and player-initiated.';
+      : 'Keep content PG-13. Dramatic tension and mild peril are fine; avoid graphic or explicit content.';
 
   const modeNote =
     options.mode === 'one_shot'
@@ -159,11 +157,15 @@ export async function sendToDM(
   if (!apiKey) { onError('API key expired or not found. Please re-add it in Settings.'); return; }
 
   // 3. Build messages
+  // Filter out 'system' and 'event' roles — 'event' messages are display-only
+  // (dice rolls, local game events) and must never be sent to the LLM API.
   const systemPrompt = buildSystemPrompt(campaign);
   const isOpenScene = userInput.trim() === OPEN_SCENE_SENTINEL;
   const actualUserMessage = isOpenScene ? buildOpenScenePrompt(campaign) : userInput.trim();
 
-  const history: Message[] = campaign.messages.filter((m) => m.role !== 'system');
+  const history: Message[] = campaign.messages.filter(
+    (m) => m.role !== 'system' && m.role !== 'event'
+  );
   const messages: Message[] = [
     { role: 'system', content: systemPrompt, timestamp: new Date().toISOString() },
     ...history,
@@ -177,11 +179,11 @@ export async function sendToDM(
     messages,
     onChunk,
     (fullText) => {
-      // Persist the exchange
-      const updatedMessages: Message[] = [
-        ...campaign.messages.filter((m) => m.role !== 'system'),
-        { role: 'user', content: userInput, timestamp: new Date().toISOString() },
-        { role: 'assistant', content: fullText, timestamp: new Date().toISOString() },
+      // Persist only user/assistant messages — never 'event' messages
+      const updatedMessages = [
+        ...campaign.messages.filter((m) => m.role !== 'system' && m.role !== 'event'),
+        { role: 'user' as const, content: userInput, timestamp: new Date().toISOString() },
+        { role: 'assistant' as const, content: fullText, timestamp: new Date().toISOString() },
       ];
       saveCampaign({ ...campaign, messages: updatedMessages });
       onDone(fullText);

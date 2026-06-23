@@ -6,12 +6,12 @@
 import type { Character } from '../types';
 import type { AdventureOptions, DiceRollResult } from './schemas';
 
-// ─── ID generation ────────────────────────────────────────────────────────────
+// ─── ID generation ────────────────────────────────────────────────────────────────────────────
 export function generateId(): string { return crypto.randomUUID(); }
 /** Alias used by CharacterLab */
 export const newId = generateId;
 
-// ─── Storage keys ───────────────────────────────────────────────────────────
+// ─── Storage keys ───────────────────────────────────────────────────────────────────────
 const CAMPAIGNS_KEY    = 'dm_campaigns_v1';
 const ACTIVE_KEY       = 'dm_active_campaign';
 const CHARACTER_KEY    = 'dm_character_v1';
@@ -22,14 +22,16 @@ function safeParse<T>(raw: string | null): T | null {
   try { return JSON.parse(raw) as T; } catch { return null; }
 }
 
-// ─── Campaign shape used throughout the app ───────────────────────────────────────
+// ─── Campaign shape used throughout the app ────────────────────────────────────────────────────
 export interface StoredCampaign {
   id: string;
   title: string;
   options: AdventureOptions;
   /** mode mirrors options.mode for quick access */
   mode: string;
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: string }>;
+  // 'event' messages are display-only (dice rolls, game events).
+  // dm.ts filters them out before persisting and before sending to the LLM.
+  messages: Array<{ role: 'user' | 'assistant' | 'system' | 'event'; content: string; timestamp: string }>;
   characters: StoredCharacterRef[];
   events: CampaignEvent[];
   createdAt: string;
@@ -50,7 +52,7 @@ export interface CampaignEvent {
   [key: string]: any;
 }
 
-// ─── Campaign list (summaries) ──────────────────────────────────────────────────
+// ─── Campaign list (summaries) ────────────────────────────────────────────────────────────────
 export interface CampaignSummary {
   id: string;
   title: string;
@@ -72,7 +74,7 @@ export function listCampaigns(): CampaignSummary[] {
   );
 }
 
-// ─── Active campaign pointer ──────────────────────────────────────────────────
+// ─── Active campaign pointer ──────────────────────────────────────────────────────────────
 export function getActiveCampaignId(): string | null {
   return localStorage.getItem(ACTIVE_KEY);
 }
@@ -83,7 +85,7 @@ export function clearActiveCampaign(): void {
   localStorage.removeItem(ACTIVE_KEY);
 }
 
-// ─── Full campaign CRUD ─────────────────────────────────────────────────────────
+// ─── Full campaign CRUD ────────────────────────────────────────────────────────────────────────
 export function createCampaign(
   title: string,
   options: AdventureOptions,
@@ -136,7 +138,7 @@ export function appendEvent(campaignId: string, event: CampaignEvent): void {
   saveCampaign(campaign);
 }
 
-// ─── Character ───────────────────────────────────────────────────────────────
+// ─── Character ────────────────────────────────────────────────────────────────────────────
 export function saveCharacter(data: Character): void {
   localStorage.setItem(CHARACTER_KEY, JSON.stringify(data));
 }
@@ -147,7 +149,7 @@ export function clearCharacter(): void {
   localStorage.removeItem(CHARACTER_KEY);
 }
 
-// ─── Session (tab-scoped) ────────────────────────────────────────────────────
+// ─── Session (tab-scoped) ──────────────────────────────────────────────────────────────────────
 export function saveSession(data: unknown): void {
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(data));
 }
