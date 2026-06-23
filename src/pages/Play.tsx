@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import DiceRoller from '../components/DiceRoller';
+import CombatTracker from '../components/CombatTracker';
 import { getActiveCampaignId, loadCampaign, appendEvent } from '../lib/storage';
 import { listVaultEntries } from '../lib/vault';
 import { sendToDM } from '../lib/dm';
@@ -8,17 +9,17 @@ import type { DiceRollResult } from '../lib/schemas';
 
 interface Message { role: 'user' | 'assistant'; content: string; timestamp: string; }
 
-// ── Markdown-lite renderer (bold, italic, blockquote, no XSS) ───────────────────
+// ── Markdown-lite renderer (bold, italic, blockquote, no XSS) ────────────────
 function renderMarkdown(text: string): string {
   return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')  // escape HTML first
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
     .replace(/\n/g, '<br />');
 }
 
-// ── Passphrase modal ─────────────────────────────────────────────────────────
+// ── Passphrase modal ──────────────────────────────────────────────────────────
 function PassphraseModal({ onSubmit, onCancel, error }: {
   onSubmit: (p: string) => void;
   onCancel: () => void;
@@ -63,7 +64,7 @@ function PassphraseModal({ onSubmit, onCancel, error }: {
   );
 }
 
-// ── Main Play page ──────────────────────────────────────────────────────────
+// ── Main Play page ────────────────────────────────────────────────────────────
 export default function Play() {
   const navigate = useNavigate();
   const campaignId = getActiveCampaignId();
@@ -83,7 +84,6 @@ export default function Play() {
   const [passphraseError, setPassphraseError] = useState<string | null>(null);
   const [pendingInput, setPendingInput] = useState('');
   const [dmError, setDmError] = useState<string | null>(null);
-  // Cache decrypted passphrase for the session (in-memory only, never stored)
   const passphraseRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -94,7 +94,6 @@ export default function Play() {
   const vaultEntries = listVaultEntries();
   const hasKey = vaultEntries.length > 0;
 
-  // ── No active campaign ────────────────────────────────────────────────────
   if (!campaign) {
     return (
       <div style={{
@@ -110,37 +109,27 @@ export default function Play() {
     );
   }
 
-  // ── Core send logic ────────────────────────────────────────────────────────
   async function doSend(text: string, passphrase: string) {
     if (!text.trim() || loading) return;
     setLoading(true);
     setDmError(null);
     setStreamingText('');
-
     const userMsg: Message = { role: 'user', content: text.trim(), timestamp: new Date().toISOString() };
     setMessages(m => [...m, userMsg]);
-
     abortRef.current = new AbortController();
-
     await sendToDM(
       text.trim(),
       passphrase,
-      // onChunk — append each token to the streaming buffer
       (chunk) => setStreamingText(t => t + chunk),
-      // onDone — move streamed text into messages list
       (fullText) => {
         setStreamingText('');
         setMessages(m => [...m, { role: 'assistant', content: fullText, timestamp: new Date().toISOString() }]);
         setLoading(false);
       },
-      // onError
       (msg) => {
         setStreamingText('');
         setDmError(msg);
-        // If passphrase was wrong, clear the cached one and force re-prompt
-        if (msg.includes('passphrase') || msg.includes('expired')) {
-          passphraseRef.current = null;
-        }
+        if (msg.includes('passphrase') || msg.includes('expired')) passphraseRef.current = null;
         setLoading(false);
       },
       abortRef.current.signal,
@@ -148,18 +137,10 @@ export default function Play() {
   }
 
   function handleSend() {
-    if (!input.trim() || loading) return;
-    if (!hasKey) { return; }
-
+    if (!input.trim() || loading || !hasKey) return;
     const text = input.trim();
     setInput('');
-
-    // If we have a cached passphrase, use it directly
-    if (passphraseRef.current) {
-      doSend(text, passphraseRef.current);
-      return;
-    }
-    // Otherwise show the passphrase modal
+    if (passphraseRef.current) { doSend(text, passphraseRef.current); return; }
     setPendingInput(text);
     setPassphraseError(null);
     setShowPassphrase(true);
@@ -199,9 +180,8 @@ export default function Play() {
         height: 'calc(100dvh - 64px)', boxSizing: 'border-box',
       }}>
 
-        {/* ── Chat pane ────────────────────────────────────────────────────────── */}
+        {/* Chat pane */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', minWidth: 0 }}>
-
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', paddingBottom: 'var(--space-3)', borderBottom: '1px solid var(--color-divider)', flexWrap: 'wrap' }}>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-lg)', color: 'var(--color-primary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {campaign.title}
@@ -209,7 +189,6 @@ export default function Play() {
             <span className="badge">{campaign.options.mode === 'one_shot' ? 'One-shot' : 'Campaign'}</span>
           </div>
 
-          {/* No API key banner */}
           {!hasKey && (
             <div role="alert" style={{
               background: 'var(--color-warning-highlight)', border: '1px solid var(--color-warning)',
@@ -217,12 +196,11 @@ export default function Play() {
               fontSize: 'var(--text-sm)', color: 'var(--color-warning)',
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-3)',
             }}>
-              <span>⚠ No LLM key configured — the DM can’t respond yet.</span>
+              <span>⚠ No LLM key configured — the DM can't respond yet.</span>
               <Link to="/settings" style={{ color: 'var(--color-warning)', fontWeight: 600, textDecoration: 'underline' }}>Add key in Settings</Link>
             </div>
           )}
 
-          {/* DM error banner */}
           {dmError && (
             <div role="alert" style={{
               background: 'var(--color-error-highlight)', border: '1px solid var(--color-error)',
@@ -235,7 +213,6 @@ export default function Play() {
             </div>
           )}
 
-          {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', paddingRight: 'var(--space-2)' }}>
             {messages.length === 0 && !streamingText && (
               <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 'var(--space-16) var(--space-8)' }}>
@@ -246,9 +223,7 @@ export default function Play() {
 
             {messages.map((m, i) => (
               <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start', gap: 'var(--space-1)' }}>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-faint)' }}>
-                  {m.role === 'user' ? 'You' : '🏰 DM'}
-                </div>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-faint)' }}>{m.role === 'user' ? 'You' : '🏰 DM'}</div>
                 <div
                   style={{
                     maxWidth: '80%', padding: 'var(--space-3) var(--space-4)',
@@ -263,7 +238,6 @@ export default function Play() {
               </div>
             ))}
 
-            {/* Live streaming bubble */}
             {streamingText && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 'var(--space-1)' }}>
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-faint)' }}>🏰 DM</div>
@@ -289,7 +263,6 @@ export default function Play() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input */}
           <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <textarea
               value={input}
@@ -306,7 +279,7 @@ export default function Play() {
           </div>
         </div>
 
-        {/* ── Right panel ──────────────────────────────────────────────────────── */}
+        {/* Right panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', overflowY: 'auto' }}>
           <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <button className={`btn ${panel === 'dice' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setPanel(p => p === 'dice' ? null : 'dice')}>Dice</button>
@@ -316,11 +289,9 @@ export default function Play() {
           {panel === 'dice' && (
             <div className="card"><DiceRoller onRoll={handleDiceRoll} actorType="player" /></div>
           )}
+
           {panel === 'combat' && (
-            <div className="card" style={{ color: 'var(--color-text-muted)', textAlign: 'center', padding: 'var(--space-8)' }}>
-              <div style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-lg)' }}>⚔️</div>
-              <div style={{ fontSize: 'var(--text-sm)' }}>Combat tracker — coming soon.</div>
-            </div>
+            <div className="card"><CombatTracker /></div>
           )}
 
           {campaign.characters.length > 0 && (
