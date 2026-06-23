@@ -17,6 +17,10 @@ import {
   type AbilityKey,
   type AbilityScores,
 } from '../lib/chargen';
+import {
+  getClassFeaturesUpToLevel,
+  getBackgroundFeature,
+} from '../lib/classTraits';
 
 const RACES = ['Human','Elf','Dwarf','Halfling','Dragonborn','Gnome','Half-Elf','Half-Orc','Tiefling'];
 const CLASSES = ['Barbarian','Bard','Cleric','Druid','Fighter','Monk','Paladin','Ranger','Rogue','Sorcerer','Warlock','Wizard'];
@@ -41,6 +45,7 @@ export default function CharacterLab() {
   const [rolledValues, setRolledValues] = useState<number[]>([]);
   const [rollDetails, setRollDetails] = useState<string>('');
   const [randomizeNote, setRandomizeNote] = useState<string>('');
+  const [traitsOpen, setTraitsOpen] = useState(false);
   const [form, setForm] = useState({
     characterName: '', playerName: '', race: RACES[0], class: CLASSES[4],
     background: BACKGROUNDS[0], alignment: ALIGNMENTS[0], level: 1,
@@ -108,6 +113,16 @@ export default function CharacterLab() {
   const pointBuyRemaining = 27 - pointBuySpent;
   const statBudgetWarning = useMemo(() => getStatBudgetWarning(form.abilityScores, form.level), [form.abilityScores, form.level]);
   const expectedBudget = useMemo(() => getExpectedStatBudget(form.level), [form.level]);
+
+  // Traits panel data — recomputed when class/background/level change
+  const classFeatures = useMemo(
+    () => getClassFeaturesUpToLevel(form.class, Math.min(form.level, 3)),
+    [form.class, form.level],
+  );
+  const backgroundFeature = useMemo(
+    () => getBackgroundFeature(form.background),
+    [form.background],
+  );
 
   function handleClassChange(nextClass: string) {
     if (statMethod === 'standard_array') {
@@ -367,6 +382,78 @@ export default function CharacterLab() {
               <div style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>{statBudgetWarning}</div>
             )}
           </fieldset>
+
+          {/* ── Class & Background Traits panel ─────────────────────────── */}
+          <div style={{
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            overflow: 'hidden',
+          }}>
+            <button
+              type="button"
+              onClick={() => setTraitsOpen(o => !o)}
+              aria-expanded={traitsOpen}
+              style={{
+                width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: 'var(--space-3) var(--space-4)',
+                background: 'var(--color-surface-offset)',
+                fontSize: 'var(--text-sm)', fontWeight: 600,
+                borderBottom: traitsOpen ? '1px solid var(--color-border)' : 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <span>Class &amp; Background Traits</span>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', transform: traitsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 180ms ease' }}>▼</span>
+            </button>
+
+            {traitsOpen && (
+              <div style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+
+                {/* Class features */}
+                {classFeatures.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-primary)', marginBottom: 'var(--space-3)' }}>
+                      {form.class} — Level 1{form.level >= 2 ? '–' + Math.min(form.level, 3) : ''} Features
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                      {classFeatures.map(f => (
+                        <div key={`${f.level}-${f.name}`}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-1)' }}>
+                            <span style={{
+                              fontSize: 'var(--text-xs)', padding: '1px 6px',
+                              borderRadius: 'var(--radius-full)',
+                              background: 'var(--color-primary-highlight)',
+                              color: 'var(--color-primary)', fontWeight: 600,
+                            }}>Lv {f.level}</span>
+                            <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{f.name}</span>
+                          </div>
+                          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0, maxWidth: '100%' }}>
+                            {f.description}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Background feature */}
+                {backgroundFeature && (
+                  <div>
+                    <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
+                      {form.background} — Background Feature
+                    </div>
+                    <div style={{ marginBottom: 'var(--space-1)' }}>
+                      <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{backgroundFeature.name}</span>
+                    </div>
+                    <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0, maxWidth: '100%' }}>
+                      {backgroundFeature.description}
+                    </p>
+                  </div>
+                )}
+
+              </div>
+            )}
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
             <div>
