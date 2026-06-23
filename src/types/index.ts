@@ -1,4 +1,4 @@
-// ─── Dice ────────────────────────────────────────────────────────────────────
+// ─── Dice ────────────────────────────────────────────────────────────────────────────
 export type DieSize = 4 | 6 | 8 | 10 | 12 | 20 | 100;
 
 export interface DiceRoll {
@@ -13,7 +13,7 @@ export interface DiceRoll {
   rolledBy: 'player' | 'dm' | 'npc';
 }
 
-// ─── Character ───────────────────────────────────────────────────────────────
+// ─── Character ───────────────────────────────────────────────────────────────────────
 export interface AbilityScores {
   strength: number;
   dexterity: number;
@@ -50,7 +50,7 @@ export interface Character {
   updatedAt: number;
 }
 
-// ─── Campaign ────────────────────────────────────────────────────────────────
+// ─── Campaign ───────────────────────────────────────────────────────────────────────
 export type CampaignLength = 'one-shot' | 'short' | 'standard' | 'epic';
 export type Tone = 'heroic' | 'dark' | 'comedic' | 'mystery' | 'horror' | 'custom';
 
@@ -75,8 +75,11 @@ export interface Campaign {
   updatedAt: number;
 }
 
-// ─── Session / Messages ──────────────────────────────────────────────────────
-export type MessageRole = 'user' | 'assistant' | 'system';
+// ─── Session / Messages ───────────────────────────────────────────────────────────
+export type MessageRole = 'user' | 'assistant' | 'system' | 'event';
+// 'event' is used for local game events (dice rolls, combat notes) that are
+// displayed in the chat UI but MUST NOT be sent to any LLM API. The llm.ts
+// filter strips all role === 'event' messages before building API payloads.
 
 export interface Message {
   id: string;
@@ -95,7 +98,7 @@ export interface Session {
   lastActiveAt: number;
 }
 
-// ─── LLM Config ──────────────────────────────────────────────────────────────
+// ─── LLM Config ────────────────────────────────────────────────────────────────────
 export type LLMProvider = 'openai' | 'anthropic' | 'google';
 
 export interface LLMConfig {

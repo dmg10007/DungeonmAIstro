@@ -8,7 +8,14 @@ import { listVaultEntries } from '../lib/vault';
 import { sendToDM } from '../lib/dm';
 import type { DiceRollResult } from '../lib/schemas';
 
-interface Message { role: 'user' | 'assistant'; content: string; timestamp: string; }
+// 'event' is a local-only role for dice rolls and game events.
+// These messages are displayed in the UI but stripped by llm.ts before
+// any API call, so they never pollute the LLM conversation history.
+interface Message {
+  role: 'user' | 'assistant' | 'event';
+  content: string;
+  timestamp: string;
+}
 
 const RULES_LABELS: Record<number, string> = {
   1: 'By the Book',
@@ -194,8 +201,9 @@ export default function Play() {
   function handleDiceRoll(result: DiceRollResult) {
     if (!campaignId) return;
     appendEvent(campaignId, { type: 'dice_rolled', timestamp: result.timestamp, result });
+    // role: 'event' — displayed locally, never sent to the LLM API
     setMessages(m => [...m, {
-      role: 'assistant',
+      role: 'event',
       content: `🎲 **${result.actorType === 'player' ? 'You rolled' : 'Rolled'}** ${result.notation}: **${result.total}** [${result.rolls.join(', ')}]${result.reason ? ` — *${result.reason}*` : ''}`,
       timestamp: result.timestamp,
     }]);
@@ -258,22 +266,43 @@ export default function Play() {
               </div>
             )}
 
-            {messages.map((m, i) => (
-              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start', gap: 'var(--space-1)' }}>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-faint)' }}>{m.role === 'user' ? 'You' : '🏰 DM'}</div>
-                <div
-                  style={{
-                    maxWidth: '80%', padding: 'var(--space-3) var(--space-4)',
-                    borderRadius: 'var(--radius-lg)',
-                    background: m.role === 'user' ? 'var(--color-primary)' : 'var(--color-surface)',
-                    color: m.role === 'user' ? 'var(--color-text-inverse)' : 'var(--color-text)',
-                    border: m.role === 'assistant' ? '1px solid var(--color-border)' : 'none',
-                    fontSize: 'var(--text-sm)', wordBreak: 'break-word', lineHeight: 1.6,
-                  }}
-                  dangerouslySetInnerHTML={{ __html: m.role === 'assistant' ? renderMarkdown(m.content) : DOMPurify.sanitize(m.content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }) }}
-                />
-              </div>
-            ))}
+            {messages.map((m, i) => {
+              // Event messages (dice rolls) get a distinct centered pill style,
+              // visually separate from user/assistant bubbles.
+              if (m.role === 'event') {
+                return (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'center' }}>
+                    <div style={{
+                      padding: 'var(--space-2) var(--space-4)',
+                      borderRadius: 'var(--radius-full)',
+                      background: 'var(--color-surface-offset)',
+                      border: '1px solid var(--color-border)',
+                      fontSize: 'var(--text-xs)',
+                      color: 'var(--color-text-muted)',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }}
+                    />
+                  </div>
+                );
+              }
+              return (
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start', gap: 'var(--space-1)' }}>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-faint)' }}>{m.role === 'user' ? 'You' : '🏰 DM'}</div>
+                  <div
+                    style={{
+                      maxWidth: '80%', padding: 'var(--space-3) var(--space-4)',
+                      borderRadius: 'var(--radius-lg)',
+                      background: m.role === 'user' ? 'var(--color-primary)' : 'var(--color-surface)',
+                      color: m.role === 'user' ? 'var(--color-text-inverse)' : 'var(--color-text)',
+                      border: m.role === 'assistant' ? '1px solid var(--color-border)' : 'none',
+                      fontSize: 'var(--text-sm)', wordBreak: 'break-word', lineHeight: 1.6,
+                    }}
+                    dangerouslySetInnerHTML={{ __html: m.role === 'assistant' ? renderMarkdown(m.content) : DOMPurify.sanitize(m.content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }) }}
+                  />
+                </div>
+              );
+            })}
 
             {streamingText && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 'var(--space-1)' }}>
