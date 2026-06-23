@@ -23,8 +23,6 @@ export async function streamCompletion(
   onError: (err: Error) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  // Each inner stream function accumulates text and returns it.
-  // streamCompletion then calls onDone(text) or onError depending on outcome.
   let accumulated = '';
   const trackingChunk = (t: string) => { accumulated += t; onChunk(t); };
 
@@ -65,10 +63,7 @@ export async function streamCompletion(
     if (!signal?.aborted) onDone(accumulated);
 
   } catch (err) {
-    if (signal?.aborted) return; // user cancelled — no callback
-
-    // If we already streamed some content, surface it rather than swallowing it.
-    // This handles partial 503s where Gemini sends tokens then errors.
+    if (signal?.aborted) return;
     if (accumulated.length > 0) {
       onDone(accumulated);
     } else {
@@ -166,10 +161,6 @@ async function anthropicStream(
  * - Response shape: candidates[0].content.parts[0].text
  * - Stream does NOT send [DONE] — it just ends
  * - alt=sse uses Server-Sent Events format
- *
- * thinkingConfig / thinkingBudget is only supported on gemini-2.5+ models.
- * Sending it to gemini-2.0-flash or earlier returns a 400 'Unknown name
- * thinkingConfig' error, so it is gated on the model string below.
  */
 async function googleStream(
   config: LLMConfig,
@@ -200,14 +191,6 @@ async function googleStream(
       temperature: config.temperature ?? 0.9,
     },
   };
-
-  // thinkingConfig is only valid for gemini-2.5+ models.
-  // Setting thinkingBudget: 0 disables hidden chain-of-thought tokens,
-  // reducing latency and cost for narrative DM responses. Do not send
-  // this field at all for gemini-2.0 or earlier — it causes a 400 error.
-  if (model.startsWith('gemini-2.5')) {
-    body.thinkingConfig = { thinkingBudget: 0 };
-  }
 
   if (systemContent) {
     body.systemInstruction = { parts: [{ text: systemContent }] };
