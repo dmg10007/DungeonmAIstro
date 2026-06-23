@@ -100,7 +100,9 @@ async function openaiCompatibleStream(
     },
     body: JSON.stringify({
       model: config.model,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: messages
+        .filter((m) => m.role !== 'event')
+        .map((m) => ({ role: m.role, content: m.content })),
       max_tokens: config.maxTokens,
       temperature: config.temperature,
       stream: true,
@@ -125,7 +127,7 @@ async function anthropicStream(
   signal?: AbortSignal,
 ) {
   const system = messages.find((m) => m.role === 'system')?.content ?? '';
-  const convo = messages.filter((m) => m.role !== 'system');
+  const convo = messages.filter((m) => m.role !== 'system' && m.role !== 'event');
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     signal,
@@ -164,6 +166,8 @@ async function anthropicStream(
  * - Response shape: candidates[0].content.parts[0].text
  * - Stream does NOT send [DONE] — it just ends
  * - alt=sse uses Server-Sent Events format
+ * - thinkingBudget: 0 disables hidden thinking tokens for narrative calls,
+ *   eliminating ~872 wasted tokens and the associated latency overhead.
  */
 async function googleStream(
   config: LLMConfig,
@@ -176,7 +180,9 @@ async function googleStream(
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
 
   const systemContent = messages.find((m) => m.role === 'system')?.content;
-  const convo = messages.filter((m) => m.role !== 'system');
+  // Exclude 'event' role messages (dice rolls, local game events) — they are
+  // display-only and must never appear in the LLM conversation history.
+  const convo = messages.filter((m) => m.role !== 'system' && m.role !== 'event');
 
   const contents = mergeGeminiTurns(
     convo.map((m) => ({
@@ -190,6 +196,13 @@ async function googleStream(
     generationConfig: {
       maxOutputTokens: config.maxTokens ?? 8192,
       temperature: config.temperature ?? 0.9,
+    },
+    // Disable hidden chain-of-thought for narrative DM responses.
+    // Thinking tokens (thinkingBudget > 0) add latency and token cost with
+    // no benefit for storytelling. Re-enable selectively for rules-lookup
+    // calls if a dedicated adjudication endpoint is added in future.
+    thinkingConfig: {
+      thinkingBudget: 0,
     },
   };
 
@@ -208,8 +221,8 @@ async function googleStream(
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Gemini ${res.status}: ${extractApiErrorMessage(body, res.status)}`);
+    const errBody = await res.text();
+    throw new Error(`Gemini ${res.status}: ${extractApiErrorMessage(errBody, res.status)}`);
   }
 
   await readGeminiSSE(res, onChunk, signal);
