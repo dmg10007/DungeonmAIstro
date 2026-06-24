@@ -12,5 +12,6 @@ export default defineConfig({
   },
   server: {
     hmr: { overlay: true },
+    allowedHosts: ['personal-laptop.taila7fb53.ts.net'],
   },
 });
