@@ -45,11 +45,7 @@ const VERBOSITY_LABELS: Record<number, string> = {
 // ---------------------------------------------------------------------------
 // Crit detection helpers
 // ---------------------------------------------------------------------------
-// A critical only fires on a raw d20 face of 1 or 20 — never on totals.
-// We check the raw rolls array: if ANY roll in the result equals 1 or 20
-// on a d20 die we classify it.
 function detectCrit(result: DiceRollResult): 'nat20' | 'nat1' | null {
-  // Only applies to d20 rolls
   if (!result.notation.toLowerCase().includes('d20')) return null;
   const rawRolls = result.rolls;
   if (rawRolls.includes(20)) return 'nat20';
@@ -57,8 +53,6 @@ function detectCrit(result: DiceRollResult): 'nat20' | 'nat1' | null {
   return null;
 }
 
-// Builds the injected DM message for a crit — sent as a 'user' turn so
-// the DM sees it and responds according to its CRITICAL ROLL RULES.
 function buildCritMessage(result: DiceRollResult, critType: 'nat20' | 'nat1'): string {
   const tag = critType === 'nat20' ? '[CRIT SUCCESS — Natural 20]' : '[CRIT FAILURE — Natural 1]';
   const label = result.reason ? ` on ${result.reason}` : '';
@@ -66,6 +60,15 @@ function buildCritMessage(result: DiceRollResult, critType: 'nat20' | 'nat1'): s
     ? `rolled [${result.rolls.join(', ')}] (${critType === 'nat20' ? 'taking the highest' : 'taking the lowest'}), total ${result.total}`
     : `rolled ${result.total}`;
   return `${tag} I just ${rollStr}${label}. Please narrate a ${critType === 'nat20' ? 'spectacular critical success' : 'catastrophic critical failure'} for this action as described in your critical roll rules — unique, memorable, and without modifying any ability scores or stats.`;
+}
+
+// Builds a generic DM notification for any non-crit roll when "notify DM" is on
+function buildRollNotifyMessage(result: DiceRollResult): string {
+  const label = result.reason ? ` for ${result.reason}` : '';
+  const rollStr = result.rolls.length > 1
+    ? `[${result.rolls.join(', ')}], total ${result.total}`
+    : `${result.total}`;
+  return `[DICE ROLL] I rolled ${result.notation}${label}: ${rollStr}. Please incorporate this result into the narrative as appropriate.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +229,8 @@ export default function Play() {
   const [passphraseError, setPassphraseError] = useState<string | null>(null);
   const [pendingInput, setPendingInput] = useState('');
   const [dmError, setDmError] = useState<string | null>(null);
+  // When true, every dice roll (not just crits) sends a notification to the DM
+  const [notifyDMOnRoll, setNotifyDMOnRoll] = useState(false);
   const passphraseRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -258,7 +263,7 @@ export default function Play() {
   // -------------------------------------------------------------------------
   // DM send
   // -------------------------------------------------------------------------
-  async function doSend(text: string, passphrase: string) {
+  async function doSend(text: string, passphrase: string, persist = true) {
     if (!text.trim() || loading) return;
     setLoading(true);
     setDmError(null);
@@ -282,6 +287,7 @@ export default function Play() {
         setLoading(false);
       },
       abortRef.current.signal,
+      persist,
     );
   }
 
@@ -339,7 +345,9 @@ export default function Play() {
   }
 
   // -------------------------------------------------------------------------
-  // Dice roll handler — detects crits and auto-sends a DM message
+  // Dice roll handler
+  // Crits always auto-send to the DM.
+  // Non-crits send a brief notify message when notifyDMOnRoll is enabled.
   // -------------------------------------------------------------------------
   function handleDiceRoll(result: DiceRollResult) {
     if (!campaignId) return;
@@ -347,28 +355,36 @@ export default function Play() {
 
     const crit = detectCrit(result);
 
-    // Build the event label shown in the chat bubble
     let eventLabel = '';
     if (crit === 'nat20') eventLabel = ' ✨ CRITICAL SUCCESS!';
     else if (crit === 'nat1') eventLabel = ' 💀 CRITICAL FAILURE!';
 
-    // role: 'event' — displayed locally, never sent to the LLM API
     setMessages(m => [...m, {
       role: 'event',
       content: `🎲 **${result.actorType === 'player' ? 'You rolled' : 'Rolled'}** ${result.notation}: **${result.total}** [${result.rolls.join(', ')}]${result.reason ? ` — *${result.reason}*` : ''}${eventLabel}`,
       timestamp: result.timestamp,
     }]);
 
-    // If it's a crit and we have a passphrase, auto-send the crit context to the DM
-    if (crit && passphraseRef.current) {
+    if (crit) {
+      // Crit — always notify the DM
       const critMsg = buildCritMessage(result, crit);
-      doSend(critMsg, passphraseRef.current);
-    } else if (crit && !passphraseRef.current) {
-      // No passphrase yet — queue a passphrase prompt then send
-      const critMsg = buildCritMessage(result, crit);
-      setPendingInput(critMsg);
-      setPassphraseError(null);
-      setShowPassphrase(true);
+      if (passphraseRef.current) {
+        doSend(critMsg, passphraseRef.current, false);
+      } else {
+        setPendingInput(critMsg);
+        setPassphraseError(null);
+        setShowPassphrase(true);
+      }
+    } else if (notifyDMOnRoll) {
+      // Non-crit notify — only when the toggle is on
+      const notifyMsg = buildRollNotifyMessage(result);
+      if (passphraseRef.current) {
+        doSend(notifyMsg, passphraseRef.current, false);
+      } else {
+        setPendingInput(notifyMsg);
+        setPassphraseError(null);
+        setShowPassphrase(true);
+      }
     }
   }
 
@@ -434,7 +450,7 @@ export default function Play() {
             </div>
           )}
 
-          {/* Message list — only scrolling region */}
+          {/* Message list */}
           <div style={{
             flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column',
             gap: 'var(--space-4)', paddingRight: 'var(--space-2)', minHeight: 0,
@@ -452,7 +468,6 @@ export default function Play() {
 
             {messages.map((m, i) => {
               if (m.role === 'event') {
-                // Detect if it's a crit event for special styling
                 const isCritSuccess = m.content.includes('CRITICAL SUCCESS');
                 const isCritFail = m.content.includes('CRITICAL FAILURE');
                 return (
@@ -527,7 +542,7 @@ export default function Play() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input — pinned to bottom */}
+          {/* Input */}
           <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
             {isSlashMode && <SlashHint input={input} />}
             <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
@@ -570,6 +585,36 @@ export default function Play() {
               <CombatTracker />
             </div>
           )}
+
+          {/* Notify DM on roll toggle */}
+          <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', flexShrink: 0 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Notify DM on roll</div>
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                {notifyDMOnRoll ? 'Every roll sends a note to the DM' : 'Only crits auto-notify the DM'}
+              </div>
+            </div>
+            <button
+              role="switch"
+              aria-checked={notifyDMOnRoll}
+              aria-label="Notify DM on every roll"
+              onClick={() => setNotifyDMOnRoll(v => !v)}
+              style={{
+                width: '44px', height: '24px', borderRadius: 'var(--radius-full)',
+                background: notifyDMOnRoll ? 'var(--color-primary)' : 'var(--color-border)',
+                position: 'relative', flexShrink: 0, transition: 'background 180ms ease',
+                border: 'none', cursor: 'pointer',
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: '3px',
+                left: notifyDMOnRoll ? '23px' : '3px',
+                width: '18px', height: '18px', borderRadius: '50%',
+                background: 'white', transition: 'left 180ms ease',
+                boxShadow: '0 1px 3px oklch(0 0 0 / 0.2)',
+              }} />
+            </button>
+          </div>
 
           {/* Party */}
           {campaign.characters.length > 0 && (
@@ -616,7 +661,7 @@ export default function Play() {
               </div>
             ))}
             <div style={{ marginTop: 'var(--space-1)', padding: 'var(--space-2)', background: 'var(--color-gold-highlight)', borderRadius: 'var(--radius-sm)', color: 'var(--color-gold)', fontWeight: 600 }}>
-              ✨ Nat 20 / 💀 Nat 1 auto-notifies the DM
+              ✨ Nat 20 / 💀 Nat 1 always notify the DM
             </div>
           </div>
         </div>
