@@ -13,18 +13,24 @@ const VAULT_KEY = 'dm_vault_v1';
 const KEY_EXPIRY_MS = 6 * 7 * 24 * 60 * 60 * 1000; // 6 weeks
 
 interface VaultEntry {
-  ciphertext: string;   // base64 AES-GCM ciphertext
-  iv: string;           // base64 IV
-  salt: string;         // base64 PBKDF2 salt
-  storedAt: number;     // Unix ms timestamp
-  expiresAt: number;    // Unix ms timestamp
+  ciphertext: string;
+  iv: string;
+  salt: string;
+  storedAt: number;
+  expiresAt: number;
   provider: string;
   label: string;
   model: string;
 }
 
-/** Derive AES-GCM key from passphrase + salt using PBKDF2 */
+function ensureSecureCryptoAvailable(): void {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error('Secure encryption is unavailable in this browser context. Access the app over https:// or localhost to store and use API keys.');
+  }
+}
+
 async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
+  ensureSecureCryptoAvailable();
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     'raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']
@@ -45,7 +51,6 @@ function unb64(s: string): Uint8Array {
   return Uint8Array.from(atob(s), c => c.charCodeAt(0));
 }
 
-/** Store an API key encrypted with the user's passphrase */
 export async function storeApiKey(
   passphrase: string,
   provider: string,
@@ -53,6 +58,7 @@ export async function storeApiKey(
   model: string,
   apiKey: string
 ): Promise<void> {
+  ensureSecureCryptoAvailable();
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv   = crypto.getRandomValues(new Uint8Array(12));
   const cryptoKey = await deriveKey(passphrase, salt);
@@ -73,18 +79,17 @@ export async function storeApiKey(
     label,
     model,
   };
-  // Merge with existing vault
   const existing = loadVaultRaw();
   existing[`${provider}:${label}`] = entry;
   localStorage.setItem(VAULT_KEY, JSON.stringify(existing));
 }
 
-/** Retrieve and decrypt an API key */
 export async function retrieveApiKey(
   passphrase: string,
   provider: string,
   label: string
 ): Promise<string | null> {
+  ensureSecureCryptoAvailable();
   const existing = loadVaultRaw();
   const entry: VaultEntry | undefined = existing[`${provider}:${label}`];
   if (!entry) return null;
@@ -101,24 +106,21 @@ export async function retrieveApiKey(
     );
     return new TextDecoder().decode(plaintext);
   } catch {
-    return null; // wrong passphrase or corrupted
+    return null;
   }
 }
 
-/** List stored key metadata (no plaintext keys exposed) */
 export function listVaultEntries(): Omit<VaultEntry, 'ciphertext' | 'iv' | 'salt'>[] {
   const raw = loadVaultRaw();
   return Object.values(raw).map(({ ciphertext: _c, iv: _i, salt: _s, ...meta }) => meta);
 }
 
-/** Remove a key entry */
 export function removeApiKey(provider: string, label: string): void {
   const existing = loadVaultRaw();
   delete existing[`${provider}:${label}`];
   localStorage.setItem(VAULT_KEY, JSON.stringify(existing));
 }
 
-/** Purge all expired keys */
 export function purgeExpiredKeys(): void {
   const existing = loadVaultRaw();
   const now = Date.now();

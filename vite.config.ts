@@ -11,6 +11,8 @@ export default defineConfig({
     sourcemap: true,
   },
   server: {
+    host: true,
+    https: true,
     hmr: { overlay: true },
     allowedHosts: ['personal-laptop.taila7fb53.ts.net'],
   },
