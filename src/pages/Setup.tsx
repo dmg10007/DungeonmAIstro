@@ -14,9 +14,9 @@ const LENGTHS: Record<string, string> = {
 const RULES_LABELS: Record<number, { label: string; description: string }> = {
   1: { label: 'By the Book', description: 'Strict RAW — all 5e rules enforced accurately. Misunderstandings corrected gently but precisely.' },
   2: { label: 'Mostly RAW', description: 'Rules as written with minor common-table rulings allowed.' },
-  3: { label: 'Balanced', description: 'Rules as intended — bent for fun when it doesn\'t break balance.' },
+  3: { label: 'Balanced', description: "Rules as intended — bent for fun when it doesn't break balance." },
   4: { label: 'Flexible', description: 'Rules are guidelines. Player agency and narrative take priority.' },
-  5: { label: 'Rule of Cool', description: 'Anything goes if it\'s dramatic and fun. Rules are suggestions.' },
+  5: { label: 'Rule of Cool', description: "Anything goes if it's dramatic and fun. Rules are suggestions." },
 };
 
 const NARRATIVE_LABELS: Record<number, { label: string; description: string }> = {
@@ -25,6 +25,14 @@ const NARRATIVE_LABELS: Record<number, { label: string; description: string }> =
   3: { label: 'Balanced', description: 'Mix of vivid description and tactical dice rolls.' },
   4: { label: 'Dice-leaning', description: 'Frequent skill checks and saves alongside rich narration.' },
   5: { label: 'Dice Heavy', description: 'Lean into the mechanical game — skill checks, saving throws, contested rolls throughout.' },
+};
+
+const VERBOSITY_LABELS: Record<number, { label: string; description: string }> = {
+  1: { label: 'Terse', description: '1–3 tight paragraphs. Maximum momentum, minimum fluff.' },
+  2: { label: 'Concise', description: '2–4 paragraphs. Enough detail to set the mood, but economical.' },
+  3: { label: 'Balanced', description: '3–5 paragraphs. Scenes breathe without overstaying their welcome.' },
+  4: { label: 'Rich', description: '4–7 paragraphs. Deep atmosphere, NPC personality, and world detail.' },
+  5: { label: 'Verbose', description: '6+ paragraphs. Novelistic prose — every moment fully realised.' },
 };
 
 export default function Setup() {
@@ -38,6 +46,7 @@ export default function Setup() {
   const [safetyMode, setSafetyMode] = useState<'strict' | 'balanced'>('balanced');
   const [rulesStrictness, setRulesStrictness] = useState(3);
   const [narrativeStyle, setNarrativeStyle] = useState(3);
+  const [responseVerbosity, setResponseVerbosity] = useState(3);
   const [error, setError] = useState<string | null>(null);
 
   function toggleTone(t: string) {
@@ -46,7 +55,7 @@ export default function Setup() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const options = { mode, playerCount, experienceLevel, tone, desiredLength, settingPrompt, safetyMode, rulesStrictness, narrativeStyle };
+    const options = { mode, playerCount, experienceLevel, tone, desiredLength, settingPrompt, safetyMode, rulesStrictness, narrativeStyle, responseVerbosity };
     const parsed = adventureOptionsSchema.safeParse(options);
     if (!parsed.success) { setError(parsed.error.errors[0].message); return; }
     const title = settingPrompt.slice(0, 60) || `${mode === 'one_shot' ? 'One-shot' : 'Campaign'} — ${new Date().toLocaleDateString()}`;
@@ -157,6 +166,28 @@ export default function Setup() {
           </div>
           <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
             {NARRATIVE_LABELS[narrativeStyle].description}
+          </p>
+        </div>
+
+        {/* Response Verbosity slider */}
+        <div>
+          <label htmlFor="responseVerbosity" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
+            <span>DM Response Length</span>
+            <span style={{ color: 'var(--color-primary)' }}>{VERBOSITY_LABELS[responseVerbosity].label}</span>
+          </label>
+          <input
+            id="responseVerbosity"
+            type="range" min={1} max={5} step={1}
+            value={responseVerbosity}
+            onChange={e => setResponseVerbosity(Number(e.target.value))}
+            style={{ width: '100%', accentColor: 'var(--color-primary)' }}
+            aria-valuetext={VERBOSITY_LABELS[responseVerbosity].label}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-1)' }}>
+            <span>Terse</span><span>Verbose</span>
+          </div>
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
+            {VERBOSITY_LABELS[responseVerbosity].description}
           </p>
         </div>
 

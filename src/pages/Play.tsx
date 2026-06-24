@@ -34,18 +34,48 @@ const NARRATIVE_LABELS: Record<number, string> = {
   5: 'Dice Heavy',
 };
 
+const VERBOSITY_LABELS: Record<number, string> = {
+  1: 'Terse',
+  2: 'Concise',
+  3: 'Balanced',
+  4: 'Rich',
+  5: 'Verbose',
+};
+
+// ---------------------------------------------------------------------------
+// Crit detection helpers
+// ---------------------------------------------------------------------------
+// A critical only fires on a raw d20 face of 1 or 20 — never on totals.
+// We check the raw rolls array: if ANY roll in the result equals 1 or 20
+// on a d20 die we classify it.
+function detectCrit(result: DiceRollResult): 'nat20' | 'nat1' | null {
+  // Only applies to d20 rolls
+  if (!result.notation.toLowerCase().includes('d20')) return null;
+  const rawRolls = result.rolls;
+  if (rawRolls.includes(20)) return 'nat20';
+  if (rawRolls.includes(1)) return 'nat1';
+  return null;
+}
+
+// Builds the injected DM message for a crit — sent as a 'user' turn so
+// the DM sees it and responds according to its CRITICAL ROLL RULES.
+function buildCritMessage(result: DiceRollResult, critType: 'nat20' | 'nat1'): string {
+  const tag = critType === 'nat20' ? '[CRIT SUCCESS — Natural 20]' : '[CRIT FAILURE — Natural 1]';
+  const label = result.reason ? ` on ${result.reason}` : '';
+  const rollStr = result.rolls.length > 1
+    ? `rolled [${result.rolls.join(', ')}] (${critType === 'nat20' ? 'taking the highest' : 'taking the lowest'}), total ${result.total}`
+    : `rolled ${result.total}`;
+  return `${tag} I just ${rollStr}${label}. Please narrate a ${critType === 'nat20' ? 'spectacular critical success' : 'catastrophic critical failure'} for this action as described in your critical roll rules — unique, memorable, and without modifying any ability scores or stats.`;
+}
+
 // ---------------------------------------------------------------------------
 // Slash command parser
 // ---------------------------------------------------------------------------
-// Supported syntax:
-//   /roll 2d6+3
-//   /roll 2d6+3 perception check
-//   /r d20-1 stealth
-//   /adv perception          (roll with advantage)
-//   /dis stealth             (roll with disadvantage)
-//   /roll advantage stealth
-//   /roll disadvantage stealth
-// ---------------------------------------------------------------------------
+const SLASH_RE = /^\/(?:roll|r)\s+(.*)/i;
+const ADV_SHORTHAND = /^\/adv(?:antage)?\s*(.*)/i;
+const DIS_SHORTHAND = /^\/dis(?:advantage)?\s*(.*)/i;
+const NOTATION_RE = /^(\d{1,2})?d(4|6|8|10|12|20|100)([+-]\d{1,3})?/i;
+
 interface SlashRollParsed {
   type: 'roll';
   notation: string;
@@ -54,52 +84,29 @@ interface SlashRollParsed {
   disadvantage: boolean;
 }
 
-const SLASH_RE = /^\/(?:roll|r)\s+(.*)/i;
-const ADV_SHORTHAND = /^\/adv(?:antage)?\s*(.*)/i;
-const DIS_SHORTHAND = /^\/dis(?:advantage)?\s*(.*)/i;
-// dice notation: optional count, d, faces, optional modifier
-const NOTATION_RE = /^(\d{1,2})?d(4|6|8|10|12|20|100)([+-]\d{1,3})?/i;
-
 function parseSlashCommand(text: string): SlashRollParsed | null {
   const trimmed = text.trim();
-
-  // /adv [reason]
   const advMatch = trimmed.match(ADV_SHORTHAND);
-  if (advMatch) {
-    return { type: 'roll', notation: 'd20', reason: advMatch[1].trim() || 'Advantage', advantage: true, disadvantage: false };
-  }
-
-  // /dis [reason]
+  if (advMatch) return { type: 'roll', notation: 'd20', reason: advMatch[1].trim() || 'Advantage', advantage: true, disadvantage: false };
   const disMatch = trimmed.match(DIS_SHORTHAND);
-  if (disMatch) {
-    return { type: 'roll', notation: 'd20', reason: disMatch[1].trim() || 'Disadvantage', advantage: false, disadvantage: true };
-  }
-
-  // /roll ... or /r ...
+  if (disMatch) return { type: 'roll', notation: 'd20', reason: disMatch[1].trim() || 'Disadvantage', advantage: false, disadvantage: true };
   const rollMatch = trimmed.match(SLASH_RE);
   if (!rollMatch) return null;
-
   const rest = rollMatch[1].trim();
-
-  // /roll advantage [reason]
   if (/^adv(?:antage)?\s*/i.test(rest)) {
     const reason = rest.replace(/^adv(?:antage)?\s*/i, '').trim();
     return { type: 'roll', notation: 'd20', reason: reason || 'Advantage', advantage: true, disadvantage: false };
   }
-  // /roll disadvantage [reason]
   if (/^dis(?:advantage)?\s*/i.test(rest)) {
     const reason = rest.replace(/^dis(?:advantage)?\s*/i, '').trim();
     return { type: 'roll', notation: 'd20', reason: reason || 'Disadvantage', advantage: false, disadvantage: true };
   }
-
-  // /roll 2d6+3 reason text
   const notationMatch = rest.match(NOTATION_RE);
   if (notationMatch) {
     const notation = notationMatch[0];
     const reason = rest.slice(notation.length).trim();
     return { type: 'roll', notation, reason, advantage: false, disadvantage: false };
   }
-
   return null;
 }
 
@@ -111,13 +118,11 @@ function renderMarkdown(text: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
-
   const html = escaped
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
     .replace(/\n/g, '<br />');
-
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ['strong', 'em', 'blockquote', 'br'],
     ALLOWED_ATTR: [],
@@ -125,30 +130,21 @@ function renderMarkdown(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Slash command hint shown below textarea
+// Slash hint
 // ---------------------------------------------------------------------------
 function SlashHint({ input }: { input: string }) {
   if (!input.startsWith('/')) return null;
   const parsed = parseSlashCommand(input);
   const examples = [
-    '/roll d20',
-    '/roll 2d6+3 fire damage',
-    '/roll d20-1 stealth',
-    '/adv perception',
-    '/dis athletics',
-    '/roll advantage attack',
+    '/roll d20', '/roll 2d6+3 fire damage', '/roll d20-1 stealth',
+    '/adv perception', '/dis athletics', '/roll advantage attack',
   ];
   return (
     <div style={{
-      background: 'var(--color-surface)',
-      border: '1px solid var(--color-border)',
-      borderRadius: 'var(--radius-md)',
-      padding: 'var(--space-3)',
-      fontSize: 'var(--text-xs)',
-      color: 'var(--color-text-muted)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 'var(--space-2)',
+      background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+      borderRadius: 'var(--radius-md)', padding: 'var(--space-3)',
+      fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)',
+      display: 'flex', flexDirection: 'column', gap: 'var(--space-2)',
     }}>
       {parsed ? (
         <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>
@@ -193,15 +189,9 @@ function PassphraseModal({ onSubmit, onCancel, error }: {
         </div>
         <form onSubmit={e => { e.preventDefault(); if (value.length >= 8) onSubmit(value); }}
           style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <input
-            ref={inputRef}
-            type="password"
-            className="input"
-            placeholder="Vault passphrase"
-            value={value}
-            onChange={e => setValue(e.target.value)}
-            autoComplete="current-password"
-            aria-label="Vault passphrase"
+          <input ref={inputRef} type="password" className="input" placeholder="Vault passphrase"
+            value={value} onChange={e => setValue(e.target.value)}
+            autoComplete="current-password" aria-label="Vault passphrase"
           />
           {error && <p role="alert" style={{ color: 'var(--color-error)', fontSize: 'var(--text-sm)' }}>{error}</p>}
           <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
@@ -248,6 +238,7 @@ export default function Play() {
 
   const rulesLabel = useMemo(() => RULES_LABELS[campaign?.options.rulesStrictness ?? 3], [campaign?.options.rulesStrictness]);
   const narrativeLabel = useMemo(() => NARRATIVE_LABELS[campaign?.options.narrativeStyle ?? 3], [campaign?.options.narrativeStyle]);
+  const verbosityLabel = useMemo(() => VERBOSITY_LABELS[campaign?.options.responseVerbosity ?? 3], [campaign?.options.responseVerbosity]);
 
   if (!campaign) {
     return (
@@ -304,29 +295,14 @@ export default function Play() {
         const r1 = roll('d20', 'player', undefined, parsed.reason || 'Advantage');
         const r2 = roll('d20', 'player', undefined, parsed.reason || 'Advantage');
         const winner = r1.total >= r2.total ? r1 : r2;
-        result = {
-          ...winner,
-          notation: '2d20kh1',
-          rolls: [r1.total, r2.total],
-          reason: parsed.reason || 'Advantage',
-        };
+        result = { ...winner, notation: '2d20kh1', rolls: [r1.total, r2.total], reason: parsed.reason || 'Advantage' };
       } else if (parsed.disadvantage) {
         const r1 = roll('d20', 'player', undefined, parsed.reason || 'Disadvantage');
         const r2 = roll('d20', 'player', undefined, parsed.reason || 'Disadvantage');
         const loser = r1.total <= r2.total ? r1 : r2;
-        result = {
-          ...loser,
-          notation: '2d20kl1',
-          rolls: [r1.total, r2.total],
-          reason: parsed.reason || 'Disadvantage',
-        };
+        result = { ...loser, notation: '2d20kl1', rolls: [r1.total, r2.total], reason: parsed.reason || 'Disadvantage' };
       } else {
-        result = roll(
-          parsed.notation,
-          'player',
-          undefined,
-          parsed.reason || undefined,
-        );
+        result = roll(parsed.notation, 'player', undefined, parsed.reason || undefined);
       }
       handleDiceRoll(result);
     } catch (e) {
@@ -337,15 +313,8 @@ export default function Play() {
   function handleSend() {
     if (!input.trim() || loading || !hasKey) return;
     const text = input.trim();
-
-    // Intercept slash commands — execute locally, never send to DM
     const slash = parseSlashCommand(text);
-    if (slash) {
-      setInput('');
-      executeSlashRoll(slash);
-      return;
-    }
-
+    if (slash) { setInput(''); executeSlashRoll(slash); return; }
     setInput('');
     if (passphraseRef.current) { doSend(text, passphraseRef.current); return; }
     setPendingInput(text);
@@ -355,10 +324,7 @@ export default function Play() {
 
   function handleOpenScene() {
     if (loading || !hasKey) return;
-    if (passphraseRef.current) {
-      doSend('__OPEN_SCENE__', passphraseRef.current);
-      return;
-    }
+    if (passphraseRef.current) { doSend('__OPEN_SCENE__', passphraseRef.current); return; }
     setPendingInput('__OPEN_SCENE__');
     setPassphraseError(null);
     setShowPassphrase(true);
@@ -372,25 +338,44 @@ export default function Play() {
     setPendingInput('');
   }
 
+  // -------------------------------------------------------------------------
+  // Dice roll handler — detects crits and auto-sends a DM message
+  // -------------------------------------------------------------------------
   function handleDiceRoll(result: DiceRollResult) {
     if (!campaignId) return;
     appendEvent(campaignId, { type: 'dice_rolled', timestamp: result.timestamp, result });
+
+    const crit = detectCrit(result);
+
+    // Build the event label shown in the chat bubble
+    let eventLabel = '';
+    if (crit === 'nat20') eventLabel = ' ✨ CRITICAL SUCCESS!';
+    else if (crit === 'nat1') eventLabel = ' 💀 CRITICAL FAILURE!';
+
     // role: 'event' — displayed locally, never sent to the LLM API
     setMessages(m => [...m, {
       role: 'event',
-      content: `🎲 **${result.actorType === 'player' ? 'You rolled' : 'Rolled'}** ${result.notation}: **${result.total}** [${result.rolls.join(', ')}]${result.reason ? ` — *${result.reason}*` : ''}`,
+      content: `🎲 **${result.actorType === 'player' ? 'You rolled' : 'Rolled'}** ${result.notation}: **${result.total}** [${result.rolls.join(', ')}]${result.reason ? ` — *${result.reason}*` : ''}${eventLabel}`,
       timestamp: result.timestamp,
     }]);
+
+    // If it's a crit and we have a passphrase, auto-send the crit context to the DM
+    if (crit && passphraseRef.current) {
+      const critMsg = buildCritMessage(result, crit);
+      doSend(critMsg, passphraseRef.current);
+    } else if (crit && !passphraseRef.current) {
+      // No passphrase yet — queue a passphrase prompt then send
+      const critMsg = buildCritMessage(result, crit);
+      setPendingInput(critMsg);
+      setPassphraseError(null);
+      setShowPassphrase(true);
+    }
   }
 
   const isSlashMode = input.startsWith('/');
 
   // -------------------------------------------------------------------------
   // Render
-  // The outer wrapper is exactly the viewport minus the 64px navbar.
-  // overflow:hidden on the wrapper + minHeight:0 on the left column ensures
-  // the chat never grows beyond the available height — the message list
-  // scrolls internally instead of pushing the page taller.
   // -------------------------------------------------------------------------
   return (
     <>
@@ -402,26 +387,22 @@ export default function Play() {
         />
       )}
 
-      {/* Outer grid — fixed to viewport height */}
       <div className="play-grid">
 
         {/* ── Left column: chat ── */}
         <div className="play-chat-col">
 
-          {/* Header row */}
+          {/* Header */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
-            paddingBottom: 'var(--space-3)',
-            borderBottom: '1px solid var(--color-divider)',
+            paddingBottom: 'var(--space-3)', borderBottom: '1px solid var(--color-divider)',
             flexWrap: 'wrap', flexShrink: 0,
           }}>
             <h1 style={{
               fontFamily: 'var(--font-display)', fontSize: 'var(--text-lg)',
               color: 'var(--color-primary)', flex: 1, minWidth: 0,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {campaign.title}
-            </h1>
+            }}>{campaign.title}</h1>
             <span className="badge">{campaign.options.mode === 'one_shot' ? 'One-shot' : 'Campaign'}</span>
             <button className="btn btn-gold" onClick={handleOpenScene} disabled={!hasKey || loading}>Open Scene</button>
           </div>
@@ -453,15 +434,10 @@ export default function Play() {
             </div>
           )}
 
-          {/* Message list — the ONLY scrolling region */}
+          {/* Message list — only scrolling region */}
           <div style={{
-            flex: 1,
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-4)',
-            paddingRight: 'var(--space-2)',
-            minHeight: 0,
+            flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column',
+            gap: 'var(--space-4)', paddingRight: 'var(--space-2)', minHeight: 0,
           }}>
             {messages.length === 0 && !streamingText && (
               <div style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 'var(--space-16) var(--space-8)' }}>
@@ -476,15 +452,31 @@ export default function Play() {
 
             {messages.map((m, i) => {
               if (m.role === 'event') {
+                // Detect if it's a crit event for special styling
+                const isCritSuccess = m.content.includes('CRITICAL SUCCESS');
+                const isCritFail = m.content.includes('CRITICAL FAILURE');
                 return (
                   <div key={i} style={{ display: 'flex', justifyContent: 'center' }}>
                     <div style={{
                       padding: 'var(--space-2) var(--space-4)',
                       borderRadius: 'var(--radius-full)',
-                      background: 'var(--color-surface-offset)',
-                      border: '1px solid var(--color-border)',
+                      background: isCritSuccess
+                        ? 'var(--color-gold-highlight)'
+                        : isCritFail
+                          ? 'var(--color-error-highlight)'
+                          : 'var(--color-surface-offset)',
+                      border: `1px solid ${
+                        isCritSuccess ? 'var(--color-gold)'
+                        : isCritFail ? 'var(--color-error)'
+                        : 'var(--color-border)'
+                      }`,
                       fontSize: 'var(--text-xs)',
-                      color: 'var(--color-text-muted)',
+                      color: isCritSuccess
+                        ? 'var(--color-gold)'
+                        : isCritFail
+                          ? 'var(--color-error)'
+                          : 'var(--color-text-muted)',
+                      fontWeight: (isCritSuccess || isCritFail) ? 700 : 400,
                       fontVariantNumeric: 'tabular-nums',
                     }}
                     dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }}
@@ -513,14 +505,13 @@ export default function Play() {
             {streamingText && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 'var(--space-1)' }}>
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-faint)' }}>🏰 DM</div>
-                <div
-                  style={{
-                    maxWidth: '80%', padding: 'var(--space-3) var(--space-4)',
-                    borderRadius: 'var(--radius-lg)',
-                    background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-                    fontSize: 'var(--text-sm)', wordBreak: 'break-word', lineHeight: 1.6,
-                  }}
-                  dangerouslySetInnerHTML={{ __html: `${renderMarkdown(streamingText)}<span style="opacity:0.5">&#9646;</span>` }}
+                <div style={{
+                  maxWidth: '80%', padding: 'var(--space-3) var(--space-4)',
+                  borderRadius: 'var(--radius-lg)',
+                  background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                  fontSize: 'var(--text-sm)', wordBreak: 'break-word', lineHeight: 1.6,
+                }}
+                dangerouslySetInnerHTML={{ __html: `${renderMarkdown(streamingText)}<span style="opacity:0.5">&#9646;</span>` }}
                 />
               </div>
             )}
@@ -536,7 +527,7 @@ export default function Play() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input area — always pinned to bottom */}
+          {/* Input — pinned to bottom */}
           <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
             {isSlashMode && <SlashHint input={input} />}
             <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
@@ -564,17 +555,11 @@ export default function Play() {
         {/* ── Right column: tools sidebar ── */}
         <div className="play-sidebar">
 
-          {/* Tool toggles */}
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
-            <button className={`btn ${panel === 'dice' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setPanel(p => p === 'dice' ? null : 'dice')}>
-              🎲 Dice
-            </button>
-            <button className={`btn ${panel === 'combat' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setPanel(p => p === 'combat' ? null : 'combat')}>
-              ⚔ Combat
-            </button>
+            <button className={`btn ${panel === 'dice' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setPanel(p => p === 'dice' ? null : 'dice')}>🎲 Dice</button>
+            <button className={`btn ${panel === 'combat' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setPanel(p => p === 'combat' ? null : 'combat')}>⚔ Combat</button>
           </div>
 
-          {/* Tool panels */}
           {panel === 'dice' && (
             <div className="card" style={{ overflowY: 'auto' }}>
               <DiceRoller onRoll={handleDiceRoll} actorType="player" />
@@ -606,17 +591,16 @@ export default function Play() {
             <div>Experience: {campaign.options.experienceLevel}</div>
             <div>Rules: {rulesLabel}</div>
             <div>Narrative: {narrativeLabel}</div>
+            <div>Verbosity: {verbosityLabel}</div>
             <div>Safety: {campaign.options.safetyMode}</div>
             <button
               className="btn btn-ghost"
               style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', padding: 'var(--space-1) var(--space-2)' }}
               onClick={() => navigate('/setup')}
-            >
-              New Adventure
-            </button>
+            >New Adventure</button>
           </div>
 
-          {/* Slash command reference card */}
+          {/* Slash command reference */}
           <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>/ Commands</div>
             {[
@@ -631,38 +615,32 @@ export default function Play() {
                 <span style={{ color: 'var(--color-text-faint)', textAlign: 'right' }}>{desc}</span>
               </div>
             ))}
+            <div style={{ marginTop: 'var(--space-1)', padding: 'var(--space-2)', background: 'var(--color-gold-highlight)', borderRadius: 'var(--radius-sm)', color: 'var(--color-gold)', fontWeight: 600 }}>
+              ✨ Nat 20 / 💀 Nat 1 auto-notifies the DM
+            </div>
           </div>
         </div>
       </div>
 
       <style>{`
-        /* ------------------------------------------------------------------ */
-        /* Play page layout — locked to viewport height                       */
-        /* ------------------------------------------------------------------ */
         .play-grid {
           display: grid;
           grid-template-columns: 1fr 300px;
           gap: var(--space-6);
-          /* Exactly fills the space below the fixed 64px navbar */
           height: calc(100dvh - 64px);
           max-width: var(--content-wide);
           margin: 0 auto;
           padding: var(--space-5) var(--space-6);
           box-sizing: border-box;
-          /* Prevent the grid itself from overflowing */
           overflow: hidden;
         }
-
-        /* Chat column: flex column, clips at grid height */
         .play-chat-col {
           display: flex;
           flex-direction: column;
           gap: var(--space-3);
-          min-height: 0;   /* critical: lets flex children shrink below content size */
+          min-height: 0;
           overflow: hidden;
         }
-
-        /* Sidebar: flex column with its own scroll, sticky in view */
         .play-sidebar {
           display: flex;
           flex-direction: column;
@@ -670,8 +648,6 @@ export default function Play() {
           overflow-y: auto;
           min-height: 0;
         }
-
-        /* Mobile: stack vertically, sidebar follows chat naturally */
         @media (max-width: 768px) {
           .play-grid {
             grid-template-columns: 1fr;
@@ -687,7 +663,6 @@ export default function Play() {
             min-height: auto;
           }
         }
-
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
         blockquote {
           border-left: 3px solid var(--color-primary);

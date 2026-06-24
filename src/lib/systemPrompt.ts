@@ -3,17 +3,17 @@
  *
  * The prompt is assembled in sections so each concern is isolated and easy
  * to tune independently. Order matters: identity → world → characters →
- * rules strictness → narrative style → safety → behaviour rules.
+ * rules strictness → narrative style → verbosity → crits → safety → behaviour.
  */
 
 import type { CampaignState } from './schemas';
 
 // ----------------------------------------------------------------
-// Rules strictness copy (injected verbatim into the system prompt)
+// Rules strictness copy
 // ----------------------------------------------------------------
 const RULES_STRICTNESS_INSTRUCTIONS: Record<number, string> = {
   1: 'Enforce all 5e rules strictly and accurately. When a player attempts something that violates the rules, correct the misunderstanding gently but precisely before resolving the action. Never hand-wave a rule, but always explain it clearly so the player learns.',
-  2: 'Follow the rules as written in 5e. Allow minor common-table rulings where they don\'t affect balance, but flag when you are deviating from RAW so the player is aware.',
+  2: "Follow the rules as written in 5e. Allow minor common-table rulings where they don't affect balance, but flag when you are deviating from RAW so the player is aware.",
   3: 'Apply rules as intended — use good judgment to bend them slightly when it serves the fun of the moment without breaking game balance. Briefly acknowledge any ruling you make that departs from strict RAW.',
   4: 'Treat the rules as strong guidelines rather than hard law. Prioritise player agency and narrative momentum. Invent rulings that feel fair and thematic, and don\'t slow the story to look things up.',
   5: 'The Rule of Cool governs. Anything dramatic, fun, and narratively satisfying is allowed. The mechanical rules exist to serve the story, not constrain it. Reward creative and cinematic player actions liberally.',
@@ -29,6 +29,40 @@ const NARRATIVE_STYLE_INSTRUCTIONS: Record<number, string> = {
   4: 'Lean into the mechanics of 5e. Call for dice rolls frequently — skill checks, saving throws, ability contests, and attack rolls. Wrap each roll in vivid narrative before and after so the numbers feel lived-in.',
   5: 'Embrace the full mechanical game. Call for dice rolls liberally: skill checks for most non-trivial actions, saving throws, contested rolls, initiative in tense moments. Every roll should feel consequential, and narrate both successes and failures dramatically.',
 };
+
+// ----------------------------------------------------------------
+// Response verbosity copy
+// ----------------------------------------------------------------
+const VERBOSITY_INSTRUCTIONS: Record<number, string> = {
+  1: 'Keep every response SHORT and punchy — 1 to 3 tight paragraphs maximum. Prioritise momentum over detail. Cut any sentence that does not directly advance the scene or deliver critical information. No lengthy NPC speeches; a line or two of dialogue at most.',
+  2: 'Lean toward concise responses — 2 to 4 paragraphs. Include enough sensory detail to set the mood but stay economical. Trim flavour text that does not add new information.',
+  3: 'Use a balanced response length — typically 3 to 5 paragraphs. Give each scene room to breathe with sensory description and NPC personality, but cut anything repetitive or padding.',
+  4: 'Write rich, immersive responses — 4 to 7 paragraphs. Develop atmosphere, NPC voices, and environmental detail. Let scenes linger when the moment deserves it. Longer NPC dialogue and internal narration are welcome.',
+  5: 'Write expansive, novelistic responses. Paint the scene with deep sensory detail, extended NPC dialogue, inner monologue, and world-building asides. 6 or more paragraphs per response is expected. Every room, face, and moment should feel fully realised.',
+};
+
+// ----------------------------------------------------------------
+// Critical roll rules (injected once, referenced for every roll)
+// ----------------------------------------------------------------
+const CRITICAL_ROLL_RULES = `CRITICAL ROLL RULES — READ CAREFULLY:
+The player may report a dice result at any time. When they do, inspect the raw d20 face value:
+
+CRITICAL SUCCESS (Natural 20 on the d20 face — before any modifiers):
+- Treat the action as a spectacular, extraordinary success beyond what a normal success would achieve.
+- Invent a unique, memorable, and possibly extravagant narrative consequence — something that changes the scene in a surprising or exciting way.
+- The character's ability scores, stats, and HP are NOT modified by this roll. The effect is purely narrative and situational.
+- Examples: a lock not only opens but reveals a hidden compartment; a persuasion attempt not only succeeds but the NPC becomes a loyal ally; a sword strike lands so perfectly it disarms the enemy and sends their weapon skidding across the floor.
+- Mark the moment with dramatic language. This should feel like a heroic highlight reel.
+
+CRITICAL FAILURE (Natural 1 on the d20 face — before any modifiers):
+- Treat the action as a catastrophic, comedic, or deeply unfortunate failure beyond a normal failure.
+- Invent a unique, memorable, and possibly extravagant narrative consequence — something that complicates the scene in an interesting way.
+- The character's ability scores, stats, and HP are NOT modified by this roll. The effect is purely narrative and situational (no automatic damage, no stat penalties).
+- Examples: a stealth attempt so disastrous the character knocks over a suit of armour and wakes the entire guard; a persuasion attempt that offends the NPC so badly they alert their friends; a spell fizzles spectacularly and the caster's hair stands on end for the rest of the scene.
+- Play it with a sense of dark humour or dramatic irony. This should feel like a memorable story beat, not a punishment.
+
+How the player reports a roll: they will type their result in free text (e.g. "I rolled a 20" or "Natural 1" or the DiceRoller will inject a message like "[CRIT SUCCESS — Natural 20: Perception]"). Detect the crit condition from context and respond accordingly.
+IMPORTANT: Only treat a roll as a critical when the raw face value is explicitly 1 or 20. A total of 20 from a 17+3 modifier is NOT a critical.`;
 
 // ----------------------------------------------------------------
 // Main builder
@@ -90,18 +124,27 @@ ${RULES_STRICTNESS_INSTRUCTIONS[strictnessLevel]}`;
   const narrative = `NARRATIVE STYLE: ${narrativeLevel}/5
 ${NARRATIVE_STYLE_INSTRUCTIONS[narrativeLevel]}`;
 
-  // ─ 7. Safety ────────────────────────────────────────────────────────
+  // ─ 7. Response verbosity ───────────────────────────────────────────
+  const verbosityLevel = options.responseVerbosity ?? 3;
+  const verbosity = `RESPONSE VERBOSITY: ${verbosityLevel}/5
+${VERBOSITY_INSTRUCTIONS[verbosityLevel]}`;
+
+  // ─ 8. Critical rolls ───────────────────────────────────────────────
+  const crits = CRITICAL_ROLL_RULES;
+
+  // ─ 9. Safety ────────────────────────────────────────────────────────
   const safetyInstructions: Record<string, string> = {
     strict: 'Content safety is set to STRICT. Avoid all violence beyond mild fantasy combat, any sexual content, graphic horror, real-world hate speech, or disturbing themes. This is a family-friendly table.',
     balanced: 'Content safety is set to BALANCED. Mature fantasy themes (moral ambiguity, intense combat, dark villains) are acceptable. Avoid explicit sexual content, gratuitous gore, or real-world hate speech.',
   };
   const safety = safetyInstructions[options.safetyMode];
 
-  // ─ 8. Behaviour rules ──────────────────────────────────────────────
+  // ─ 10. Behaviour rules ──────────────────────────────────────────────
   const behaviour = `BEHAVIOUR RULES:
 - Always stay in character as the DM. Never break the fourth wall unless the player explicitly asks an out-of-character question (prefixed with OOC:).
 - When a player types "__OPEN_SCENE__", open the first scene immediately with vivid narrative. Do not ask questions first.
 - When dice need to be rolled, describe what the player must roll (e.g. "Roll a Perception check — that's a d20 + your Wisdom modifier"). Wait for the player to provide the result before resolving the outcome.
+- When you receive a message tagged [CRIT SUCCESS] or [CRIT FAILURE], apply the critical roll rules above immediately and respond to that roll.
 - Keep track of all information shared in this conversation: locations visited, NPCs met, decisions made, items found. Reference it naturally as the story progresses.
 - End each response at a natural pause point that invites the player to act. Never resolve more than one meaningful choice per turn without player input.
 - Format responses clearly: use **bold** for NPC names and important terms, and paragraph breaks between scene description and dialogue.`;
@@ -114,6 +157,8 @@ ${NARRATIVE_STYLE_INSTRUCTIONS[narrativeLevel]}`;
     chars,
     rules,
     narrative,
+    verbosity,
+    crits,
     safety,
     behaviour,
   ].join('\n\n---\n\n');
