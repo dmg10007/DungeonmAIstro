@@ -1,8 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import basicSsl from '@vitejs/plugin-basic-ssl';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    basicSsl(),
+  ],
   optimizeDeps: {
     include: ['dompurify'],
   },
@@ -12,7 +16,6 @@ export default defineConfig({
   },
   server: {
     host: true,
-    https: true,
     hmr: { overlay: true },
     allowedHosts: ['personal-laptop.taila7fb53.ts.net'],
   },
