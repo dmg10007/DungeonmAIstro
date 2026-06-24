@@ -5,13 +5,13 @@
  *   - Standard Array (15, 14, 13, 12, 10, 8) with class-aware priority assignment
  *   - Point Buy (27-point budget, scores 8–15, PHB cost table)
  *   - Dice Rolls (4d6 drop lowest × 6, crypto random)
- *   - Randomize (randomly selects a method and assigns scores)
+ *   - Randomize (always rolls 4d6dl, assigns by class priority, adds ASI bumps for level)
  *   - Budget validation helpers for stat-total warnings
  */
 
 import { rollDie } from './dice';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────────────────
 
 export type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
 
@@ -19,7 +19,7 @@ export type AbilityScores = Record<AbilityKey, number>;
 
 export const ABILITY_KEYS: AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
-// ─── Standard Array ───────────────────────────────────────────────────────────
+// ─── Standard Array ───────────────────────────────────────────────────────────────────
 
 /** The canonical 5e standard array values, highest to lowest. */
 const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8] as const;
@@ -59,7 +59,7 @@ export function getStandardArrayScores(className: string): AbilityScores {
   return scores;
 }
 
-// ─── Point Buy ────────────────────────────────────────────────────────────────
+// ─── Point Buy ────────────────────────────────────────────────────────────────────────
 
 /**
  * PHB point buy cost table.
@@ -83,7 +83,7 @@ export function getPointBuyCost(score: number): number | null {
   return POINT_BUY_COSTS[score] ?? null;
 }
 
-// ─── Dice Rolls ───────────────────────────────────────────────────────────────
+// ─── Dice Rolls ─────────────────────────────────────────────────────────────────────
 
 export interface SingleStatRoll {
   /** All four d6 values rolled. */
@@ -119,7 +119,59 @@ export function rollStatBlock(): StatBlock {
   };
 }
 
-// ─── Randomize ────────────────────────────────────────────────────────────────
+// ─── ASI helpers ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Per-class ASI levels (levels at which the class gains an ASI or feat).
+ * Fighter and Rogue get extras per PHB.
+ */
+const CLASS_ASI_LEVELS: Record<string, number[]> = {
+  Barbarian: [4, 8, 12, 16, 19],
+  Bard:      [4, 8, 12, 16, 19],
+  Cleric:    [4, 8, 12, 16, 19],
+  Druid:     [4, 8, 12, 16, 19],
+  Fighter:   [4, 6, 8, 12, 14, 16, 19],
+  Monk:      [4, 8, 12, 16, 19],
+  Paladin:   [4, 8, 12, 16, 19],
+  Ranger:    [4, 8, 12, 16, 19],
+  Rogue:     [4, 8, 10, 12, 16, 19],
+  Sorcerer:  [4, 8, 12, 16, 19],
+  Warlock:   [4, 8, 12, 16, 19],
+  Wizard:    [4, 8, 12, 16, 19],
+};
+
+/**
+ * Returns the number of ASIs earned up to (and including) the given level
+ * for the given class.
+ */
+export function getAsiCount(className: string, level: number): number {
+  const levels = CLASS_ASI_LEVELS[className] ?? CLASS_ASI_LEVELS['Barbarian'];
+  return levels.filter(l => l <= level).length;
+}
+
+/**
+ * Apply `asiCount` × 2-point bumps to the top-priority abilities, capped at 20.
+ * Each ASI gives +2 to the single highest-priority stat that isn’t already 20,
+ * simulating the most common optimised choice.
+ */
+function applyAsis(scores: AbilityScores, className: string, asiCount: number): AbilityScores {
+  if (asiCount === 0) return scores;
+  const result = { ...scores };
+  const priority = CLASS_PRIORITY[className] ?? DEFAULT_PRIORITY;
+  let remaining = asiCount * 2;
+  // Distribute +2 per ASI into the primary stat, then secondary, etc.
+  for (const key of priority) {
+    if (remaining <= 0) break;
+    const room = 20 - result[key];
+    if (room <= 0) continue;
+    const bump = Math.min(remaining, room);
+    result[key] = result[key] + bump;
+    remaining -= bump;
+  }
+  return result;
+}
+
+// ─── Randomize ────────────────────────────────────────────────────────────────────────
 
 export type StatMethod = 'standard_array' | 'point_buy' | 'dice_rolls';
 
@@ -130,64 +182,38 @@ export interface RandomizeResult {
 }
 
 /**
- * Randomly picks a stat method, generates scores, and assigns them
- * using class-priority order.
+ * Randomize: always rolls 4d6 drop lowest × 6, assigns values in
+ * class-priority order, then applies ASI bumps for the character’s level.
  *
- * Weights: standard_array 40%, dice_rolls 40%, point_buy 20%
- * (point_buy is less common because randomised point buy is unusual at real tables).
+ * This gives a genuinely randomised but level-appropriate stat block
+ * every time the button is clicked — no method randomisation.
  */
-export function randomizeStatBlock(className: string): RandomizeResult {
-  const arr = new Uint32Array(1);
-  crypto.getRandomValues(arr);
-  const roll = arr[0] % 10; // 0–9
-
-  if (roll < 4) {
-    // Standard array
-    const scores = getStandardArrayScores(className);
-    return {
-      scores,
-      method: 'standard_array',
-      detail: `Standard array assigned for ${className}: ${STANDARD_ARRAY.join(', ')}`,
-    };
-  }
-
-  if (roll < 6) {
-    // Random point buy — distribute 27 points randomly within valid range
-    const scores = emptyScores(8);
-    let budget = 27;
-    const keys = [...ABILITY_KEYS].sort(() => cryptoRandFloat() - 0.5);
-    for (const key of keys) {
-      const maxAffordable = Object.entries(POINT_BUY_COSTS)
-        .filter(([, cost]) => cost <= budget)
-        .map(([score]) => parseInt(score, 10));
-      const pick = maxAffordable[Math.floor(cryptoRandFloat() * maxAffordable.length)] ?? 8;
-      scores[key] = pick;
-      budget -= POINT_BUY_COSTS[pick] ?? 0;
-    }
-    return {
-      scores,
-      method: 'point_buy',
-      detail: `Random point buy (${27 - budget} of 27 points spent)`,
-    };
-  }
-
-  // Dice rolls — roll, then assign highest to class-primary stat
+export function randomizeStatBlock(className: string, level = 1): RandomizeResult {
   const block = rollStatBlock();
   const sorted = [...block.scores].sort((a, b) => b - a);
   const priority = CLASS_PRIORITY[className] ?? DEFAULT_PRIORITY;
-  const scores = emptyScores(8);
+
+  // Assign highest rolled value to highest-priority ability
+  const base = emptyScores(8);
   priority.forEach((key, idx) => {
-    scores[key] = sorted[idx] ?? 8;
+    base[key] = sorted[idx] ?? 8;
   });
+
+  // Apply ASI bonuses earned at this level
+  const asiCount = getAsiCount(className, level);
+  const scores = applyAsis(base, className, asiCount);
+
   const rollSummary = block.rolls.map(r => `[${r.dice.join(',')}]→${r.total}`).join(' ');
+  const asiNote = asiCount > 0 ? ` + ${asiCount} ASI${asiCount > 1 ? 's' : ''} applied` : '';
+
   return {
     scores,
     method: 'dice_rolls',
-    detail: rollSummary,
+    detail: `4d6 drop lowest${asiNote}: ${rollSummary}`,
   };
 }
 
-// ─── Budget Validation ────────────────────────────────────────────────────────
+// ─── Budget Validation ────────────────────────────────────────────────────────────────────
 
 /**
  * Returns an approximate expected total ability score budget for a given level.
@@ -215,7 +241,7 @@ export function getStatBudgetWarning(scores: AbilityScores, level: number): stri
   return null;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────────────────
 
 /** Create a zeroed (or seeded) AbilityScores object. */
 export function emptyScores(fill: number): AbilityScores {
@@ -228,3 +254,6 @@ function cryptoRandFloat(): number {
   crypto.getRandomValues(arr);
   return arr[0] / 0x100000000;
 }
+
+// Keep cryptoRandFloat used (point buy path still available via rollStatBlock consumers)
+void cryptoRandFloat;

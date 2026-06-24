@@ -72,19 +72,15 @@ export default function CharacterLab() {
     setRandomizeNote('');
   }
 
+  // Randomize: always rolls 4d6dl, assigns by class priority, applies ASIs for level
   function randomizeStats() {
-    const result = randomizeStatBlock(form.class);
+    const result = randomizeStatBlock(form.class, form.level);
     setForm(f => ({ ...f, abilityScores: result.scores }));
-    setRandomizeNote(`${result.method.replace('_', ' ')}: ${result.detail}`);
-    setStatMethod(result.method);
-    if (result.method === 'dice_rolls') {
-      const scores = Object.values(result.scores).sort((a, b) => b - a);
-      setRolledValues(scores);
-      setRollDetails(result.detail);
-    } else {
-      setRolledValues([]);
-      setRollDetails('');
-    }
+    setRandomizeNote(result.detail);
+    setStatMethod('dice_rolls');
+    const scores = Object.values(result.scores).sort((a, b) => b - a);
+    setRolledValues(scores);
+    setRollDetails(result.detail);
   }
 
   function rollStats() {
@@ -114,7 +110,6 @@ export default function CharacterLab() {
   const statBudgetWarning = useMemo(() => getStatBudgetWarning(form.abilityScores, form.level), [form.abilityScores, form.level]);
   const expectedBudget = useMemo(() => getExpectedStatBudget(form.level), [form.level]);
 
-  // Traits panel data — recomputed when class/background/level change
   const classFeatures = useMemo(
     () => getClassFeaturesUpToLevel(form.class, Math.min(form.level, 3)),
     [form.class, form.level],
@@ -298,11 +293,18 @@ export default function CharacterLab() {
               <button type="button" className={`btn ${statMethod === 'standard_array' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => handleMethodChange('standard_array')}>Standard Array</button>
               <button type="button" className={`btn ${statMethod === 'point_buy' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => handleMethodChange('point_buy')}>Point Buy</button>
               <button type="button" className={`btn ${statMethod === 'dice_rolls' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => handleMethodChange('dice_rolls')}>Dice Rolls</button>
-              <button type="button" className="btn btn-gold" onClick={randomizeStats}>Randomize</button>
+              <button
+                type="button"
+                className="btn btn-gold"
+                onClick={randomizeStats}
+                title="Rolls 4d6 drop lowest, assigns by class priority, applies ASIs for your level"
+              >
+                🎲 Randomize
+              </button>
             </div>
 
             {randomizeNote && (
-              <div style={{ marginBottom: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{randomizeNote}</div>
+              <div style={{ marginBottom: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', wordBreak: 'break-all' }}>{randomizeNote}</div>
             )}
 
             {statMethod === 'point_buy' && (
@@ -341,7 +343,7 @@ export default function CharacterLab() {
                 {rolledValues.length > 0 && (
                   <>
                     <div style={{ fontSize: 'var(--text-sm)' }}>Rolled values: <strong>{rolledValues.join(', ')}</strong></div>
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{rollDetails}</div>
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', wordBreak: 'break-all' }}>{rollDetails}</div>
                   </>
                 )}
               </div>
@@ -383,7 +385,7 @@ export default function CharacterLab() {
             )}
           </fieldset>
 
-          {/* ── Class & Background Traits panel ─────────────────────────── */}
+          {/* ── Class & Background Traits panel ───────────────────────────────────── */}
           <div style={{
             border: '1px solid var(--color-border)',
             borderRadius: 'var(--radius-md)',
@@ -408,8 +410,6 @@ export default function CharacterLab() {
 
             {traitsOpen && (
               <div style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-
-                {/* Class features */}
                 {classFeatures.length > 0 && (
                   <div>
                     <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-primary)', marginBottom: 'var(--space-3)' }}>
@@ -435,8 +435,6 @@ export default function CharacterLab() {
                     </div>
                   </div>
                 )}
-
-                {/* Background feature */}
                 {backgroundFeature && (
                   <div>
                     <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
@@ -450,7 +448,6 @@ export default function CharacterLab() {
                     </p>
                   </div>
                 )}
-
               </div>
             )}
           </div>
