@@ -8,6 +8,8 @@ import { abilityModifier, formatModifier } from '../lib/dice';
 import {
   ABILITY_KEYS,
   emptyScores,
+  getDefaultAC,
+  getDefaultHP,
   getExpectedStatBudget,
   getPointBuySpent,
   getStandardArrayScores,
@@ -72,10 +74,17 @@ export default function CharacterLab() {
     setRandomizeNote('');
   }
 
-  // Randomize: always rolls 4d6dl, assigns by class priority, applies ASIs for level
+  // Randomize: 4d6dl, class priority, ASIs for level, then derive AC+HP
   function randomizeStats() {
     const result = randomizeStatBlock(form.class, form.level);
-    setForm(f => ({ ...f, abilityScores: result.scores }));
+    const hp = result.hp;
+    setForm(f => ({
+      ...f,
+      abilityScores: result.scores,
+      armorClass: result.ac,
+      hitPointMaximum: hp,
+      currentHitPoints: hp,
+    }));
     setRandomizeNote(result.detail);
     setStatMethod('dice_rolls');
     const scores = Object.values(result.scores).sort((a, b) => b - a);
@@ -102,7 +111,9 @@ export default function CharacterLab() {
     sortedAbilities.forEach((ability, idx) => {
       assigned[ability] = sorted[idx] ?? 8;
     });
-    setForm(f => ({ ...f, abilityScores: assigned }));
+    const ac = getDefaultAC(form.class, assigned);
+    const hp = getDefaultHP(form.class, form.level, assigned.con);
+    setForm(f => ({ ...f, abilityScores: assigned, armorClass: ac, hitPointMaximum: hp, currentHitPoints: hp }));
   }
 
   const pointBuySpent = useMemo(() => getPointBuySpent(form.abilityScores), [form.abilityScores]);
@@ -277,12 +288,18 @@ export default function CharacterLab() {
               <input id="level" type="number" min={1} max={20} className="input" value={form.level} onChange={e => set('level', Number(e.target.value))} />
             </div>
             <div>
-              <label htmlFor="ac" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>Armor Class</label>
+              <label htmlFor="ac" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>
+                Armor Class
+                <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', marginLeft: 4 }}>(auto-filled by Randomize)</span>
+              </label>
               <input id="ac" type="number" min={0} max={30} className="input" value={form.armorClass} onChange={e => set('armorClass', Number(e.target.value))} />
             </div>
             <div>
-              <label htmlFor="hp" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>Max HP</label>
-              <input id="hp" type="number" min={1} max={999} className="input" value={form.hitPointMaximum} onChange={e => set('hitPointMaximum', Number(e.target.value))} />
+              <label htmlFor="hp" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>
+                Max HP
+                <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', marginLeft: 4 }}>(auto-filled by Randomize)</span>
+              </label>
+              <input id="hp" type="number" min={1} max={999} className="input" value={form.hitPointMaximum} onChange={e => { set('hitPointMaximum', Number(e.target.value)); set('currentHitPoints', Number(e.target.value)); }} />
             </div>
           </div>
 
@@ -297,7 +314,7 @@ export default function CharacterLab() {
                 type="button"
                 className="btn btn-gold"
                 onClick={randomizeStats}
-                title="Rolls 4d6 drop lowest, assigns by class priority, applies ASIs for your level"
+                title="Rolls 4d6 drop lowest, assigns by class priority, applies ASIs, and sets AC + HP for your class and level"
               >
                 🎲 Randomize
               </button>
@@ -385,7 +402,7 @@ export default function CharacterLab() {
             )}
           </fieldset>
 
-          {/* ── Class & Background Traits panel ───────────────────────────────────── */}
+          {/* ── Class & Background Traits panel ─────────────────────────────── */}
           <div style={{
             border: '1px solid var(--color-border)',
             borderRadius: 'var(--radius-md)',

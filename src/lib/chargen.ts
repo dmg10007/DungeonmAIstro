@@ -6,12 +6,13 @@
  *   - Point Buy (27-point budget, scores 8–15, PHB cost table)
  *   - Dice Rolls (4d6 drop lowest × 6, crypto random)
  *   - Randomize (always rolls 4d6dl, assigns by class priority, adds ASI bumps for level)
+ *   - Default AC and HP by class + level
  *   - Budget validation helpers for stat-total warnings
  */
 
 import { rollDie } from './dice';
 
-// ─── Types ───────────────────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 export type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
 
@@ -19,15 +20,13 @@ export type AbilityScores = Record<AbilityKey, number>;
 
 export const ABILITY_KEYS: AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
-// ─── Standard Array ───────────────────────────────────────────────────────────────────
+// ─── Standard Array ───────────────────────────────────────────────────────────
 
 /** The canonical 5e standard array values, highest to lowest. */
 const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8] as const;
 
 /**
  * Class priority order: abilities ranked most-to-least important.
- * The standard array values are assigned in this order so the
- * highest value lands on the primary stat for the chosen class.
  */
 const CLASS_PRIORITY: Record<string, AbilityKey[]> = {
   Barbarian:  ['str', 'con', 'dex', 'wis', 'cha', 'int'],
@@ -46,10 +45,6 @@ const CLASS_PRIORITY: Record<string, AbilityKey[]> = {
 
 const DEFAULT_PRIORITY: AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
-/**
- * Returns ability scores built from the standard array,
- * assigned in class-priority order.
- */
 export function getStandardArrayScores(className: string): AbilityScores {
   const priority = CLASS_PRIORITY[className] ?? DEFAULT_PRIORITY;
   const scores = emptyScores(0);
@@ -59,18 +54,12 @@ export function getStandardArrayScores(className: string): AbilityScores {
   return scores;
 }
 
-// ─── Point Buy ────────────────────────────────────────────────────────────────────────
+// ─── Point Buy ────────────────────────────────────────────────────────────────
 
-/**
- * PHB point buy cost table.
- * Score 8 costs 0; each step up costs 1 more (scores 14–15 cost 2 each).
- * Valid range for point buy: 8–15.
- */
 const POINT_BUY_COSTS: Record<number, number> = {
   8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9,
 };
 
-/** Total points spent across all ability scores. */
 export function getPointBuySpent(scores: AbilityScores): number {
   return ABILITY_KEYS.reduce((total, key) => {
     const score = Math.min(Math.max(scores[key], 8), 15);
@@ -78,53 +67,38 @@ export function getPointBuySpent(scores: AbilityScores): number {
   }, 0);
 }
 
-/** Returns the point buy cost for a single score, or null if out of range. */
 export function getPointBuyCost(score: number): number | null {
   return POINT_BUY_COSTS[score] ?? null;
 }
 
-// ─── Dice Rolls ─────────────────────────────────────────────────────────────────────
+// ─── Dice Rolls ───────────────────────────────────────────────────────────────
 
 export interface SingleStatRoll {
-  /** All four d6 values rolled. */
   dice: number[];
-  /** The three kept (highest) dice. */
   kept: number[];
-  /** Sum of the three kept dice. */
   total: number;
 }
 
 export interface StatBlock {
-  /** Six stat totals in roll order (not yet assigned to abilities). */
   scores: number[];
-  /** Full breakdown per roll. */
   rolls: SingleStatRoll[];
 }
 
-/** Roll 4d6, drop the lowest die — the standard 5e stat-rolling method. */
 export function rollOneStat(): SingleStatRoll {
   const dice = Array.from({ length: 4 }, () => rollDie(6));
   const sorted = [...dice].sort((a, b) => a - b);
-  const kept = sorted.slice(1); // drop lowest
+  const kept = sorted.slice(1);
   const total = kept.reduce((a, b) => a + b, 0);
   return { dice, kept, total };
 }
 
-/** Roll a full stat block: 4d6 drop lowest, six times. */
 export function rollStatBlock(): StatBlock {
   const rolls = Array.from({ length: 6 }, () => rollOneStat());
-  return {
-    scores: rolls.map(r => r.total),
-    rolls,
-  };
+  return { scores: rolls.map(r => r.total), rolls };
 }
 
-// ─── ASI helpers ─────────────────────────────────────────────────────────────────────
+// ─── ASI helpers ──────────────────────────────────────────────────────────────
 
-/**
- * Per-class ASI levels (levels at which the class gains an ASI or feat).
- * Fighter and Rogue get extras per PHB.
- */
 const CLASS_ASI_LEVELS: Record<string, number[]> = {
   Barbarian: [4, 8, 12, 16, 19],
   Bard:      [4, 8, 12, 16, 19],
@@ -140,26 +114,16 @@ const CLASS_ASI_LEVELS: Record<string, number[]> = {
   Wizard:    [4, 8, 12, 16, 19],
 };
 
-/**
- * Returns the number of ASIs earned up to (and including) the given level
- * for the given class.
- */
 export function getAsiCount(className: string, level: number): number {
   const levels = CLASS_ASI_LEVELS[className] ?? CLASS_ASI_LEVELS['Barbarian'];
   return levels.filter(l => l <= level).length;
 }
 
-/**
- * Apply `asiCount` × 2-point bumps to the top-priority abilities, capped at 20.
- * Each ASI gives +2 to the single highest-priority stat that isn’t already 20,
- * simulating the most common optimised choice.
- */
 function applyAsis(scores: AbilityScores, className: string, asiCount: number): AbilityScores {
   if (asiCount === 0) return scores;
   const result = { ...scores };
   const priority = CLASS_PRIORITY[className] ?? DEFAULT_PRIORITY;
   let remaining = asiCount * 2;
-  // Distribute +2 per ASI into the primary stat, then secondary, etc.
   for (const key of priority) {
     if (remaining <= 0) break;
     const room = 20 - result[key];
@@ -171,7 +135,82 @@ function applyAsis(scores: AbilityScores, className: string, asiCount: number): 
   return result;
 }
 
-// ─── Randomize ────────────────────────────────────────────────────────────────────────
+// ─── Default AC and HP by class + level ──────────────────────────────────────
+
+/**
+ * Hit die per class (d-value).
+ */
+const CLASS_HIT_DIE: Record<string, number> = {
+  Barbarian: 12,
+  Bard:      8,
+  Cleric:    8,
+  Druid:     8,
+  Fighter:   10,
+  Monk:      8,
+  Paladin:   10,
+  Ranger:    10,
+  Rogue:     8,
+  Sorcerer:  6,
+  Warlock:   8,
+  Wizard:    6,
+};
+
+/**
+ * Returns the expected Max HP for a class at a given level,
+ * using the standard "take average" rule:
+ *   Level 1 = max die + CON mod
+ *   Each subsequent level = (die/2 + 1) + CON mod
+ */
+export function getDefaultHP(className: string, level: number, conScore: number): number {
+  const die = CLASS_HIT_DIE[className] ?? 8;
+  const conMod = Math.floor((conScore - 10) / 2);
+  const firstLevel = die + conMod;
+  const perLevel = Math.floor(die / 2) + 1 + conMod;
+  return firstLevel + perLevel * Math.max(0, level - 1);
+}
+
+/**
+ * Returns a reasonable default Armor Class for a class at creation.
+ * Assumes no magic items — uses the class's typical armor proficiency:
+ *   - Heavy armor classes (Fighter, Paladin, Cleric): chain mail = 16
+ *   - Medium armor classes (Ranger, Druid, Barbarian unarmored = 10+STR+CON mod):
+ *       use 14 (scale mail) for Ranger/Druid, Barbarian unarmored formula
+ *   - Light/unarmored (Rogue, Bard, Wizard, Sorcerer, Warlock, Monk):
+ *       10 + DEX mod (Monk: 10 + DEX + WIS mod)
+ */
+export function getDefaultAC(
+  className: string,
+  scores: AbilityScores,
+): number {
+  const dexMod = Math.floor((scores.dex - 10) / 2);
+  const conMod = Math.floor((scores.con - 10) / 2);
+  const wisMod = Math.floor((scores.wis - 10) / 2);
+  const strMod = Math.floor((scores.str - 10) / 2);
+  switch (className) {
+    case 'Fighter':
+    case 'Paladin':
+      return 16; // chain mail
+    case 'Cleric':
+      return 16; // chain mail (most clerics)
+    case 'Ranger':
+    case 'Druid':
+      return 14 + Math.min(dexMod, 2); // scale mail (medium, +DEX max 2)
+    case 'Barbarian':
+      return 10 + dexMod + conMod; // Unarmored Defense
+    case 'Monk':
+      return 10 + dexMod + wisMod; // Unarmored Defense
+    case 'Rogue':
+    case 'Bard':
+      return 11 + dexMod; // leather armor
+    case 'Sorcerer':
+    case 'Wizard':
+    case 'Warlock':
+    default:
+      return 10 + dexMod; // no armor
+  }
+}
+
+// ─── Randomize ────────────────────────────────────────────────────────────────
 
 export type StatMethod = 'standard_array' | 'point_buy' | 'dice_rolls';
 
@@ -179,29 +218,30 @@ export interface RandomizeResult {
   scores: AbilityScores;
   method: StatMethod;
   detail: string;
+  ac: number;
+  hp: number;
 }
 
 /**
  * Randomize: always rolls 4d6 drop lowest × 6, assigns values in
- * class-priority order, then applies ASI bumps for the character’s level.
- *
- * This gives a genuinely randomised but level-appropriate stat block
- * every time the button is clicked — no method randomisation.
+ * class-priority order, applies ASI bumps for the character's level,
+ * then derives default AC and HP from the resulting scores.
  */
 export function randomizeStatBlock(className: string, level = 1): RandomizeResult {
   const block = rollStatBlock();
   const sorted = [...block.scores].sort((a, b) => b - a);
   const priority = CLASS_PRIORITY[className] ?? DEFAULT_PRIORITY;
 
-  // Assign highest rolled value to highest-priority ability
   const base = emptyScores(8);
   priority.forEach((key, idx) => {
     base[key] = sorted[idx] ?? 8;
   });
 
-  // Apply ASI bonuses earned at this level
   const asiCount = getAsiCount(className, level);
   const scores = applyAsis(base, className, asiCount);
+
+  const ac = getDefaultAC(className, scores);
+  const hp = getDefaultHP(className, level, scores.con);
 
   const rollSummary = block.rolls.map(r => `[${r.dice.join(',')}]→${r.total}`).join(' ');
   const asiNote = asiCount > 0 ? ` + ${asiCount} ASI${asiCount > 1 ? 's' : ''} applied` : '';
@@ -210,25 +250,18 @@ export function randomizeStatBlock(className: string, level = 1): RandomizeResul
     scores,
     method: 'dice_rolls',
     detail: `4d6 drop lowest${asiNote}: ${rollSummary}`,
+    ac,
+    hp,
   };
 }
 
-// ─── Budget Validation ────────────────────────────────────────────────────────────────────
+// ─── Budget Validation ────────────────────────────────────────────────────────
 
-/**
- * Returns an approximate expected total ability score budget for a given level.
- * Standard array total = 72; point buy avg ≈ 75; rolled avg ≈ 73.
- * Higher levels often have ASIs applied, raising the budget.
- */
 export function getExpectedStatBudget(level: number): number {
-  const asiCount = Math.floor(level / 4); // rough ASI count (class-agnostic)
+  const asiCount = Math.floor(level / 4);
   return 72 + asiCount * 2;
 }
 
-/**
- * Returns a warning string if the stat total looks significantly off
- * for the given level, or null if it looks reasonable.
- */
 export function getStatBudgetWarning(scores: AbilityScores, level: number): string | null {
   const total = ABILITY_KEYS.reduce((sum, k) => sum + scores[k], 0);
   const expected = getExpectedStatBudget(level);
@@ -241,19 +274,15 @@ export function getStatBudgetWarning(scores: AbilityScores, level: number): stri
   return null;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Create a zeroed (or seeded) AbilityScores object. */
 export function emptyScores(fill: number): AbilityScores {
   return { str: fill, dex: fill, con: fill, int: fill, wis: fill, cha: fill };
 }
 
-/** Crypto-safe float in [0, 1). */
 function cryptoRandFloat(): number {
   const arr = new Uint32Array(1);
   crypto.getRandomValues(arr);
   return arr[0] / 0x100000000;
 }
-
-// Keep cryptoRandFloat used (point buy path still available via rollStatBlock consumers)
 void cryptoRandFloat;
