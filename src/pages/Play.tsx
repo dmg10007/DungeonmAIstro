@@ -199,6 +199,24 @@ function PassphraseModal({ onSubmit, onCancel, error }: {
 // ---------------------------------------------------------------------------
 function CharacterSheet({ character }: { character: Character }) {
   const scores = character.abilityScores;
+
+  // Guard: if abilityScores is missing or incomplete, show a graceful fallback
+  if (!scores || typeof scores.dex === 'undefined') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', fontSize: 'var(--text-xs)' }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-base)', color: 'var(--color-primary)', fontWeight: 700 }}>
+          {character.characterName}
+        </div>
+        <div style={{ color: 'var(--color-text-muted)' }}>
+          {character.race} {character.class} · Level {character.level}
+        </div>
+        <div style={{ color: 'var(--color-warning)', background: 'var(--color-warning-highlight)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)' }}>
+          ⚠ Ability scores are missing from this character's saved data. Re-create or re-save the character to fix this.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', fontSize: 'var(--text-xs)' }}>
       {/* Identity */}
