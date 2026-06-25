@@ -3,15 +3,13 @@ import { useNavigate, Link } from 'react-router-dom';
 import DOMPurify from 'dompurify';
 import DiceRoller from '../components/DiceRoller';
 import CombatTracker from '../components/CombatTracker';
-import { getActiveCampaignId, loadCampaign, appendEvent } from '../lib/storage';
+import { getActiveCampaignId, loadCampaign, loadCharacter, appendEvent } from '../lib/storage';
 import { listVaultEntries } from '../lib/vault';
 import { sendToDM } from '../lib/dm';
 import { roll, abilityModifier, formatModifier } from '../lib/dice';
 import type { Character, DiceRollResult } from '../lib/schemas';
 
 // 'event' is a local-only role for dice rolls and game events.
-// These messages are displayed in the UI but stripped by llm.ts before
-// any API call, so they never pollute the LLM conversation history.
 interface Message {
   role: 'user' | 'assistant' | 'event';
   content: string;
@@ -129,7 +127,7 @@ function SlashHint({ input }: { input: string }) {
   const parsed = parseSlashCommand(input);
   const examples = [
     '/roll d20', '/roll 2d6+3 fire damage', '/roll d20-1 stealth',
-    '/adv perception', '/dis athletics', '/roll advantage attack',
+    '/adv perception', '/dis athletics',
   ];
   return (
     <div style={{
@@ -200,7 +198,7 @@ function PassphraseModal({ onSubmit, onCancel, error }: {
 // Character Sheet panel
 // ---------------------------------------------------------------------------
 function CharacterSheet({ character }: { character: Character }) {
-  const profBonus = character.proficiencyBonus;
+  const scores = character.abilityScores;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', fontSize: 'var(--text-xs)' }}>
       {/* Identity */}
@@ -217,22 +215,17 @@ function CharacterSheet({ character }: { character: Character }) {
         )}
       </div>
 
-      {/* Core stats row */}
+      {/* Core stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)' }}>
-        {[
-          { label: 'AC', value: character.armorClass },
-          { label: 'HP', value: `${character.currentHitPoints}/${character.hitPointMaximum}` },
-          { label: 'Speed', value: `${character.speed}ft` },
-          { label: 'Prof', value: `+${profBonus}` },
-          { label: 'Init', value: character.initiative != null ? formatModifier(character.initiative) : formatModifier(abilityModifier(character.abilityScores.dex)) },
+        {([
+          { label: 'AC',      value: character.armorClass },
+          { label: 'HP',      value: `${character.currentHitPoints}/${character.hitPointMaximum}` },
+          { label: 'Speed',   value: `${character.speed}ft` },
+          { label: 'Prof',    value: `+${character.proficiencyBonus}` },
+          { label: 'Init',    value: formatModifier(character.initiative ?? abilityModifier(scores.dex)) },
           { label: 'Temp HP', value: character.temporaryHitPoints ?? 0 },
-        ].map(({ label, value }) => (
-          <div key={label} style={{
-            background: 'var(--color-surface-offset)',
-            borderRadius: 'var(--radius-md)',
-            padding: 'var(--space-2)',
-            textAlign: 'center',
-          }}>
+        ] as { label: string; value: string | number }[]).map(({ label, value }) => (
+          <div key={label} style={{ background: 'var(--color-surface-offset)', borderRadius: 'var(--radius-md)', padding: 'var(--space-2)', textAlign: 'center' }}>
             <div style={{ fontWeight: 700, fontSize: 'var(--text-sm)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
             <div style={{ color: 'var(--color-text-muted)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 1 }}>{label}</div>
           </div>
@@ -241,37 +234,26 @@ function CharacterSheet({ character }: { character: Character }) {
 
       {/* Ability scores */}
       <div>
-        <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 'var(--space-2)' }}>
-          Ability Scores
-        </div>
+        <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 'var(--space-2)' }}>Ability Scores</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)' }}>
           {ABILITY_KEYS.map(k => {
-            const score = character.abilityScores[k];
+            const score = scores[k];
             const mod = abilityModifier(score);
             return (
-              <div key={k} style={{
-                background: 'var(--color-surface-offset)',
-                borderRadius: 'var(--radius-md)',
-                padding: 'var(--space-2)',
-                textAlign: 'center',
-              }}>
+              <div key={k} style={{ background: 'var(--color-surface-offset)', borderRadius: 'var(--radius-md)', padding: 'var(--space-2)', textAlign: 'center' }}>
                 <div style={{ fontWeight: 700, fontSize: 'var(--text-sm)' }}>{score}</div>
                 <div style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: '10px' }}>{formatModifier(mod)}</div>
-                <div style={{ color: 'var(--color-text-muted)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  {ABILITY_LABELS[k]}
-                </div>
+                <div style={{ color: 'var(--color-text-muted)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{ABILITY_LABELS[k]}</div>
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Spellcasting (if present) */}
+      {/* Spellcasting */}
       {character.spellcastingClass && (
         <div style={{ borderTop: '1px solid var(--color-divider)', paddingTop: 'var(--space-2)' }}>
-          <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 'var(--space-2)' }}>
-            Spellcasting
-          </div>
+          <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 'var(--space-2)' }}>Spellcasting</div>
           <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
             {character.spellcastingAbility && <span><strong>{character.spellcastingAbility.toUpperCase()}</strong> ability</span>}
             {character.spellSaveDC != null && <span>Save DC <strong>{character.spellSaveDC}</strong></span>}
@@ -307,6 +289,9 @@ export default function Play() {
   const campaignId = getActiveCampaignId();
   const campaign = campaignId ? loadCampaign(campaignId) : null;
 
+  // Load the full character from its own storage key (not the campaign ref summary)
+  const activeCharacter: Character | null = loadCharacter();
+
   const [messages, setMessages] = useState<Message[]>(
     campaign?.messages
       .filter(m => m.role !== 'system')
@@ -336,9 +321,6 @@ export default function Play() {
   const narrativeLabel = useMemo(() => NARRATIVE_LABELS[campaign?.options.narrativeStyle ?? 3], [campaign?.options.narrativeStyle]);
   const verbosityLabel = useMemo(() => VERBOSITY_LABELS[campaign?.options.responseVerbosity ?? 3], [campaign?.options.responseVerbosity]);
 
-  // First character in the party (used for character sheet tab)
-  const activeCharacter: Character | null = campaign?.characters[0] ?? null;
-
   if (!campaign) {
     return (
       <div style={{
@@ -354,9 +336,6 @@ export default function Play() {
     );
   }
 
-  // -------------------------------------------------------------------------
-  // DM send
-  // -------------------------------------------------------------------------
   async function doSend(text: string, passphrase: string, persist = true) {
     if (!text.trim() || loading) return;
     setLoading(true);
@@ -366,8 +345,7 @@ export default function Play() {
     setMessages(m => [...m, userMsg]);
     abortRef.current = new AbortController();
     await sendToDM(
-      text.trim(),
-      passphrase,
+      text.trim(), passphrase,
       (chunk) => setStreamingText(t => t + chunk),
       (fullText) => {
         setStreamingText('');
@@ -385,9 +363,6 @@ export default function Play() {
     );
   }
 
-  // -------------------------------------------------------------------------
-  // Slash command execution
-  // -------------------------------------------------------------------------
   function executeSlashRoll(parsed: SlashRollParsed) {
     try {
       let result: DiceRollResult;
@@ -438,50 +413,31 @@ export default function Play() {
     setPendingInput('');
   }
 
-  // -------------------------------------------------------------------------
-  // Dice roll handler
-  // -------------------------------------------------------------------------
   function handleDiceRoll(result: DiceRollResult) {
     if (!campaignId) return;
     appendEvent(campaignId, { type: 'dice_rolled', timestamp: result.timestamp, result });
-
     const crit = detectCrit(result);
     let eventLabel = '';
     if (crit === 'nat20') eventLabel = ' ✨ CRITICAL SUCCESS!';
     else if (crit === 'nat1') eventLabel = ' 💀 CRITICAL FAILURE!';
-
     setMessages(m => [...m, {
       role: 'event',
       content: `🎲 **${result.actorType === 'player' ? 'You rolled' : 'Rolled'}** ${result.notation}: **${result.total}** [${result.rolls.join(', ')}]${result.reason ? ` — *${result.reason}*` : ''}${eventLabel}`,
       timestamp: result.timestamp,
     }]);
-
     if (crit) {
       const critMsg = buildCritMessage(result, crit);
-      if (passphraseRef.current) {
-        doSend(critMsg, passphraseRef.current, false);
-      } else {
-        setPendingInput(critMsg);
-        setPassphraseError(null);
-        setShowPassphrase(true);
-      }
+      if (passphraseRef.current) { doSend(critMsg, passphraseRef.current, false); }
+      else { setPendingInput(critMsg); setPassphraseError(null); setShowPassphrase(true); }
     } else if (notifyDMOnRoll) {
       const notifyMsg = buildRollNotifyMessage(result);
-      if (passphraseRef.current) {
-        doSend(notifyMsg, passphraseRef.current, false);
-      } else {
-        setPendingInput(notifyMsg);
-        setPassphraseError(null);
-        setShowPassphrase(true);
-      }
+      if (passphraseRef.current) { doSend(notifyMsg, passphraseRef.current, false); }
+      else { setPendingInput(notifyMsg); setPassphraseError(null); setShowPassphrase(true); }
     }
   }
 
   const isSlashMode = input.startsWith('/');
 
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
   return (
     <>
       {showPassphrase && (
@@ -494,10 +450,8 @@ export default function Play() {
 
       <div className="play-grid">
 
-        {/* ── Left column: chat ── */}
+        {/* Chat column */}
         <div className="play-chat-col">
-
-          {/* Header */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
             paddingBottom: 'var(--space-3)', borderBottom: '1px solid var(--color-divider)',
@@ -512,7 +466,6 @@ export default function Play() {
             <button className="btn btn-gold" onClick={handleOpenScene} disabled={!hasKey || loading}>Open Scene</button>
           </div>
 
-          {/* Alerts */}
           {!hasKey && (
             <div role="alert" style={{
               background: 'var(--color-warning-highlight)', border: '1px solid var(--color-warning)',
@@ -531,15 +484,13 @@ export default function Play() {
               background: 'var(--color-error-highlight)', border: '1px solid var(--color-error)',
               borderRadius: 'var(--radius-md)', padding: 'var(--space-3) var(--space-4)',
               fontSize: 'var(--text-sm)', color: 'var(--color-error)',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              flexShrink: 0,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
             }}>
               <span>{dmError}</span>
               <button className="btn btn-ghost" style={{ fontSize: 'var(--text-xs)', padding: 'var(--space-1) var(--space-2)' }} onClick={() => setDmError(null)}>×</button>
             </div>
           )}
 
-          {/* Message list */}
           <div style={{
             flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column',
             gap: 'var(--space-4)', paddingRight: 'var(--space-2)', minHeight: 0,
@@ -562,24 +513,11 @@ export default function Play() {
                 return (
                   <div key={i} style={{ display: 'flex', justifyContent: 'center' }}>
                     <div style={{
-                      padding: 'var(--space-2) var(--space-4)',
-                      borderRadius: 'var(--radius-full)',
-                      background: isCritSuccess
-                        ? 'var(--color-gold-highlight)'
-                        : isCritFail
-                          ? 'var(--color-error-highlight)'
-                          : 'var(--color-surface-offset)',
-                      border: `1px solid ${
-                        isCritSuccess ? 'var(--color-gold)'
-                        : isCritFail ? 'var(--color-error)'
-                        : 'var(--color-border)'
-                      }`,
+                      padding: 'var(--space-2) var(--space-4)', borderRadius: 'var(--radius-full)',
+                      background: isCritSuccess ? 'var(--color-gold-highlight)' : isCritFail ? 'var(--color-error-highlight)' : 'var(--color-surface-offset)',
+                      border: `1px solid ${isCritSuccess ? 'var(--color-gold)' : isCritFail ? 'var(--color-error)' : 'var(--color-border)'}`,
                       fontSize: 'var(--text-xs)',
-                      color: isCritSuccess
-                        ? 'var(--color-gold)'
-                        : isCritFail
-                          ? 'var(--color-error)'
-                          : 'var(--color-text-muted)',
+                      color: isCritSuccess ? 'var(--color-gold)' : isCritFail ? 'var(--color-error)' : 'var(--color-text-muted)',
                       fontWeight: (isCritSuccess || isCritFail) ? 700 : 400,
                       fontVariantNumeric: 'tabular-nums',
                     }}
@@ -611,9 +549,9 @@ export default function Play() {
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-faint)' }}>🏰 DM</div>
                 <div style={{
                   maxWidth: '80%', padding: 'var(--space-3) var(--space-4)',
-                  borderRadius: 'var(--radius-lg)',
-                  background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-                  fontSize: 'var(--text-sm)', wordBreak: 'break-word', lineHeight: 1.6,
+                  borderRadius: 'var(--radius-lg)', background: 'var(--color-surface)',
+                  border: '1px solid var(--color-border)', fontSize: 'var(--text-sm)',
+                  wordBreak: 'break-word', lineHeight: 1.6,
                 }}
                 dangerouslySetInnerHTML={{ __html: `${renderMarkdown(streamingText)}<span style="opacity:0.5">&#9646;</span>` }}
                 />
@@ -631,7 +569,6 @@ export default function Play() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input */}
           <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
             {isSlashMode && <SlashHint input={input} />}
             <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
@@ -641,8 +578,7 @@ export default function Play() {
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                 placeholder={hasKey ? 'What do you do? · /roll 2d6+3 · /adv perception · /dis stealth' : 'Add an API key in Settings to start playing...'}
                 className="input" rows={2} style={{ flex: 1, resize: 'none' }}
-                aria-label="Message to the DM"
-                disabled={!hasKey}
+                aria-label="Message to the DM" disabled={!hasKey}
               />
               <button
                 onClick={handleSend}
@@ -656,21 +592,12 @@ export default function Play() {
           </div>
         </div>
 
-        {/* ── Right column: tools sidebar ── */}
+        {/* Sidebar */}
         <div className="play-sidebar">
 
-          {/* Panel tabs */}
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
-            <button
-              className={`btn ${panel === 'dice' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ flex: 1 }}
-              onClick={() => setPanel(p => p === 'dice' ? null : 'dice')}
-            >🎲 Dice</button>
-            <button
-              className={`btn ${panel === 'combat' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ flex: 1 }}
-              onClick={() => setPanel(p => p === 'combat' ? null : 'combat')}
-            >⚔ Combat</button>
+            <button className={`btn ${panel === 'dice' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setPanel(p => p === 'dice' ? null : 'dice')}>🎲 Dice</button>
+            <button className={`btn ${panel === 'combat' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setPanel(p => p === 'combat' ? null : 'combat')}>⚔ Combat</button>
             {activeCharacter && (
               <button
                 className={`btn ${panel === 'sheet' ? 'btn-primary' : 'btn-ghost'}`}
@@ -697,7 +624,7 @@ export default function Play() {
             </div>
           )}
 
-          {/* Notify DM on roll toggle */}
+          {/* Notify DM toggle */}
           <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', flexShrink: 0 }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Notify DM on roll</div>
@@ -706,9 +633,7 @@ export default function Play() {
               </div>
             </div>
             <button
-              role="switch"
-              aria-checked={notifyDMOnRoll}
-              aria-label="Notify DM on every roll"
+              role="switch" aria-checked={notifyDMOnRoll} aria-label="Notify DM on every roll"
               onClick={() => setNotifyDMOnRoll(v => !v)}
               style={{
                 width: '44px', height: '24px', borderRadius: 'var(--radius-full)',
@@ -718,11 +643,9 @@ export default function Play() {
               }}
             >
               <span style={{
-                position: 'absolute', top: '3px',
-                left: notifyDMOnRoll ? '23px' : '3px',
-                width: '18px', height: '18px', borderRadius: '50%',
-                background: 'white', transition: 'left 180ms ease',
-                boxShadow: '0 1px 3px oklch(0 0 0 / 0.2)',
+                position: 'absolute', top: '3px', left: notifyDMOnRoll ? '23px' : '3px',
+                width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                transition: 'left 180ms ease', boxShadow: '0 1px 3px oklch(0 0 0 / 0.2)',
               }} />
             </button>
           </div>
@@ -756,7 +679,7 @@ export default function Play() {
             >New Adventure</button>
           </div>
 
-          {/* Slash command reference */}
+          {/* Slash reference */}
           <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>/ Commands</div>
             {[
@@ -805,19 +728,9 @@ export default function Play() {
           min-height: 0;
         }
         @media (max-width: 768px) {
-          .play-grid {
-            grid-template-columns: 1fr;
-            height: auto;
-            overflow: visible;
-          }
-          .play-chat-col {
-            height: calc(100dvh - 64px);
-            overflow: hidden;
-          }
-          .play-sidebar {
-            overflow: visible;
-            min-height: auto;
-          }
+          .play-grid { grid-template-columns: 1fr; height: auto; overflow: visible; }
+          .play-chat-col { height: calc(100dvh - 64px); overflow: hidden; }
+          .play-sidebar { overflow: visible; min-height: auto; }
         }
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
         blockquote {

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { characterSchema } from '../lib/schemas';
 import type { Character } from '../lib/schemas';
-import { newId } from '../lib/storage';
+import { newId, saveCharacter } from '../lib/storage';
 import { addCharacterToActiveCampaign } from '../lib/storageHelpers';
 import { abilityModifier, formatModifier } from '../lib/dice';
 import {
@@ -74,7 +74,6 @@ export default function CharacterLab() {
     setRandomizeNote('');
   }
 
-  // Randomize: 4d6dl, class priority, ASIs for level, then derive AC+HP
   function randomizeStats() {
     const result = randomizeStatBlock(form.class, form.level);
     const hp = result.hp;
@@ -147,7 +146,6 @@ export default function CharacterLab() {
     if (method === 'dice_rolls') {
       setRolledValues([]);
       setRollDetails('');
-      setForm(f => ({ ...f, abilityScores: { ...f.abilityScores } }));
     }
   }
 
@@ -171,6 +169,10 @@ export default function CharacterLab() {
     const parsed = characterSchema.safeParse(candidate);
     if (!parsed.success) { setError(parsed.error.errors[0].message); return; }
 
+    // Persist the full character so the Character Sheet tab can load it
+    saveCharacter(parsed.data);
+
+    // Add a summary ref to the active campaign
     addCharacterToActiveCampaign({
       id: parsed.data.id,
       characterName: parsed.data.characterName,
@@ -210,8 +212,9 @@ export default function CharacterLab() {
             setForm({
               characterName: '', playerName: '', race: RACES[0], class: CLASSES[4],
               background: BACKGROUNDS[0], alignment: ALIGNMENTS[0], level: 1,
-              abilityScores: getStandardArrayScores(CLASSES[4]), armorClass: 10, speed: 30, hitPointMaximum: 10,
-              currentHitPoints: 10, equipment: '', traits: '', ideals: '', bonds: '', flaws: ''
+              abilityScores: getStandardArrayScores(CLASSES[4]), armorClass: 10, speed: 30,
+              hitPointMaximum: 10, currentHitPoints: 10,
+              equipment: '', traits: '', ideals: '', bonds: '', flaws: ''
             });
             setStatMethod('standard_array');
             setRolledValues([]);
@@ -314,7 +317,7 @@ export default function CharacterLab() {
                 type="button"
                 className="btn btn-gold"
                 onClick={randomizeStats}
-                title="Rolls 4d6 drop lowest, assigns by class priority, applies ASIs, and sets AC + HP for your class and level"
+                title="Rolls 4d6 drop lowest, assigns by class priority, applies ASIs, and sets AC + HP"
               >
                 🎲 Randomize
               </button>
@@ -326,30 +329,23 @@ export default function CharacterLab() {
 
             {statMethod === 'point_buy' && (
               <div style={{
-                marginBottom: 'var(--space-3)',
-                padding: 'var(--space-3)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-md)',
-                background: 'var(--color-surface-offset)',
-                fontSize: 'var(--text-sm)',
+                marginBottom: 'var(--space-3)', padding: 'var(--space-3)',
+                border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)',
+                background: 'var(--color-surface-offset)', fontSize: 'var(--text-sm)',
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
-                  <span>Points spent</span>
-                  <strong>{pointBuySpent}/27</strong>
+                  <span>Points spent</span><strong>{pointBuySpent}/27</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: pointBuyRemaining < 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
-                  <span>Remaining</span>
-                  <span>{pointBuyRemaining}</span>
+                  <span>Remaining</span><span>{pointBuyRemaining}</span>
                 </div>
               </div>
             )}
 
             {statMethod === 'dice_rolls' && (
               <div style={{
-                marginBottom: 'var(--space-3)',
-                padding: 'var(--space-3)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-md)',
+                marginBottom: 'var(--space-3)', padding: 'var(--space-3)',
+                border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)',
                 background: 'var(--color-surface-offset)',
                 display: 'flex', flexDirection: 'column', gap: 'var(--space-2)',
               }}>
@@ -383,8 +379,7 @@ export default function CharacterLab() {
                       }}>i</span>
                     </label>
                     <input id={k} type="number" min={min} max={max} className="input"
-                      value={value}
-                      onChange={e => setAbility(k, Number(e.target.value))}
+                      value={value} onChange={e => setAbility(k, Number(e.target.value))}
                     />
                     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'center', marginTop: 'var(--space-1)' }}>
                       {formatModifier(abilityModifier(value))}
@@ -402,29 +397,22 @@ export default function CharacterLab() {
             )}
           </fieldset>
 
-          {/* ── Class & Background Traits panel ─────────────────────────────── */}
-          <div style={{
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            overflow: 'hidden',
-          }}>
+          {/* Class & Background Traits */}
+          <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
             <button
               type="button"
               onClick={() => setTraitsOpen(o => !o)}
               aria-expanded={traitsOpen}
               style={{
                 width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'var(--color-surface-offset)',
+                padding: 'var(--space-3) var(--space-4)', background: 'var(--color-surface-offset)',
                 fontSize: 'var(--text-sm)', fontWeight: 600,
-                borderBottom: traitsOpen ? '1px solid var(--color-border)' : 'none',
-                cursor: 'pointer',
+                borderBottom: traitsOpen ? '1px solid var(--color-border)' : 'none', cursor: 'pointer',
               }}
             >
               <span>Class &amp; Background Traits</span>
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', transform: traitsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 180ms ease' }}>▼</span>
             </button>
-
             {traitsOpen && (
               <div style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
                 {classFeatures.length > 0 && (
@@ -436,17 +424,10 @@ export default function CharacterLab() {
                       {classFeatures.map(f => (
                         <div key={`${f.level}-${f.name}`}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-1)' }}>
-                            <span style={{
-                              fontSize: 'var(--text-xs)', padding: '1px 6px',
-                              borderRadius: 'var(--radius-full)',
-                              background: 'var(--color-primary-highlight)',
-                              color: 'var(--color-primary)', fontWeight: 600,
-                            }}>Lv {f.level}</span>
+                            <span style={{ fontSize: 'var(--text-xs)', padding: '1px 6px', borderRadius: 'var(--radius-full)', background: 'var(--color-primary-highlight)', color: 'var(--color-primary)', fontWeight: 600 }}>Lv {f.level}</span>
                             <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{f.name}</span>
                           </div>
-                          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0, maxWidth: '100%' }}>
-                            {f.description}
-                          </p>
+                          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0, maxWidth: '100%' }}>{f.description}</p>
                         </div>
                       ))}
                     </div>
@@ -460,9 +441,7 @@ export default function CharacterLab() {
                     <div style={{ marginBottom: 'var(--space-1)' }}>
                       <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{backgroundFeature.name}</span>
                     </div>
-                    <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0, maxWidth: '100%' }}>
-                      {backgroundFeature.description}
-                    </p>
+                    <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0, maxWidth: '100%' }}>{backgroundFeature.description}</p>
                   </div>
                 )}
               </div>
