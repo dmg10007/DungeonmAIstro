@@ -75,6 +75,28 @@ DO NOT add any additional modifiers to the reported total. Accept the number as-
 Example: "[DICE ROLL] I rolled d20+3 for Insight: 16" means the final Insight check result is 16. Do not add +3 or any other modifier on top of 16.`;
 
 // ----------------------------------------------------------------
+// Anti-hallucination dice rule — the model must NEVER invent roll results
+// ----------------------------------------------------------------
+const ANTI_HALLUCINATION_DICE_RULE = `DICE RESULT HALLUCINATION — STRICTLY FORBIDDEN:
+
+YOU MUST NEVER invent, assume, simulate, or narrate a dice roll result that the player has not yet provided.
+
+When a dice roll is required:
+1. Describe the situation and tell the player exactly what to roll (e.g. "Roll a d20 and add your Intelligence (Investigation) modifier").
+2. STOP. End your response there. Do NOT continue the narrative.
+3. Wait for the player to type their actual result before you narrate any outcome.
+
+VIOLATIONS — these are FORBIDDEN even as examples or flavour text:
+- "With a total of 12 on your Investigation check..." (you made up 12)
+- "You rolled a 15, which means..." (you made up 15)
+- "Assuming a moderate roll, you discover..." (hypothetical outcomes are forbidden)
+- "Your Perception check of 8 reveals nothing." (you made up 8)
+- Narrating any success or failure BEFORE the player provides a number.
+
+The player is rolling a REAL die. They will type their result. You must wait for it.
+If you narrate an outcome before the player rolls, you are breaking the game. Do not do this under any circumstances.`;
+
+// ----------------------------------------------------------------
 // Main builder
 // ----------------------------------------------------------------
 export function buildSystemPrompt(campaign: CampaignState): string {
@@ -178,18 +200,21 @@ ${VERBOSITY_INSTRUCTIONS[verbosityLevel]}`;
   // ─ 9. Dice roll handling ───────────────────────────────────────────
   const diceRules = DICE_ROLL_RULES;
 
-  // ─ 10. Safety ────────────────────────────────────────────────────────
+  // ─ 10. Anti-hallucination dice rule ────────────────────────────────
+  const antiHallucination = ANTI_HALLUCINATION_DICE_RULE;
+
+  // ─ 11. Safety ────────────────────────────────────────────────────────
   const safetyInstructions: Record<string, string> = {
     strict: 'Content safety is set to STRICT. Avoid all violence beyond mild fantasy combat, any sexual content, graphic horror, real-world hate speech, or disturbing themes. This is a family-friendly table.',
     balanced: 'Content safety is set to BALANCED. Mature fantasy themes (moral ambiguity, intense combat, dark villains) are acceptable. Avoid explicit sexual content, gratuitous gore, or real-world hate speech.',
   };
   const safety = safetyInstructions[options.safetyMode];
 
-  // ─ 11. Behaviour rules ──────────────────────────────────────────────
+  // ─ 12. Behaviour rules ──────────────────────────────────────────────
   const behaviour = `BEHAVIOUR RULES:
 - Always stay in character as the DM. Never break the fourth wall unless the player explicitly asks an out-of-character question (prefixed with OOC:).
 - When a player types "__OPEN_SCENE__", open the first scene immediately with vivid narrative. Do not ask questions first.
-- When dice need to be rolled, describe what the player must roll (e.g. "Roll a Perception check — that's a d20 + your Wisdom modifier"). Wait for the player to provide the result before resolving the outcome.
+- When dice need to be rolled, tell the player what to roll and STOP. Do not narrate any outcome until the player provides their actual roll result.
 - When you receive a message tagged [CRIT SUCCESS] or [CRIT FAILURE], apply the critical roll rules above immediately and respond to that roll.
 - Keep track of all information shared in this conversation: locations visited, NPCs met, decisions made, items found. Reference it naturally as the story progresses.
 - End each response at a natural pause point that invites the player to act. Never resolve more than one meaningful choice per turn without player input.
@@ -206,6 +231,7 @@ ${VERBOSITY_INSTRUCTIONS[verbosityLevel]}`;
     verbosity,
     crits,
     diceRules,
+    antiHallucination,
     safety,
     behaviour,
   ].join('\n\n---\n\n');
