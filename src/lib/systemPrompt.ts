@@ -7,6 +7,8 @@
  */
 
 import type { CampaignState } from './schemas';
+import { loadCharacter } from './storage';
+import { abilityModifier, formatModifier } from './dice';
 
 // ----------------------------------------------------------------
 // Rules strictness copy
@@ -65,6 +67,14 @@ How the player reports a roll: they will type their result in free text (e.g. "I
 IMPORTANT: Only treat a roll as a critical when the raw face value is explicitly 1 or 20. A total of 20 from a 17+3 modifier is NOT a critical.`;
 
 // ----------------------------------------------------------------
+// Dice roll rules (prevent double-modifier)
+// ----------------------------------------------------------------
+const DICE_ROLL_RULES = `DICE ROLL HANDLING — IMPORTANT:
+When you receive a message tagged [DICE ROLL], the total value reported is the FINAL result — it already includes all applicable modifiers (ability modifiers, proficiency bonus, etc.).
+DO NOT add any additional modifiers to the reported total. Accept the number as-is and use it directly to determine the outcome.
+Example: "[DICE ROLL] I rolled d20+3 for Insight: 16" means the final Insight check result is 16. Do not add +3 or any other modifier on top of 16.`;
+
+// ----------------------------------------------------------------
 // Main builder
 // ----------------------------------------------------------------
 export function buildSystemPrompt(campaign: CampaignState): string {
@@ -101,18 +111,51 @@ Build the adventure around this prompt. Stay faithful to its themes, setting, an
       : 'No specific prompt was given. Create an original adventure that fits the tone and format above.'
   }`;
 
-  // ─ 4. Characters ─────────────────────────────────────────────────
-  const charBlock =
-    characters.length > 0
-      ? characters
-          .map(
-            c =>
-              `- ${c.characterName} (${c.race} ${c.class} ${c.level}, AC ${c.armorClass}, HP ${c.hitPointMaximum})` +
-              (c.traits ? ` | Traits: ${c.traits.slice(0, 200)}` : ''),
-          )
-          .join('\n')
-      : 'No characters registered yet. A player may introduce themselves during the session.';
-  const chars = `PARTY:\n${charBlock}`;
+  // ─ 4. Characters — full stat block including ability scores ────────────
+  // Pull the full saved character for the detailed block; fall back to campaign summary refs
+  const fullChar = loadCharacter();
+
+  let charBlock: string;
+  if (fullChar) {
+    const sc = fullChar.abilityScores;
+    const abilityBlock = sc
+      ? [
+          `STR ${sc.str} (${formatModifier(abilityModifier(sc.str))})`,
+          `DEX ${sc.dex} (${formatModifier(abilityModifier(sc.dex))})`,
+          `CON ${sc.con} (${formatModifier(abilityModifier(sc.con))})`,
+          `INT ${sc.int} (${formatModifier(abilityModifier(sc.int))})`,
+          `WIS ${sc.wis} (${formatModifier(abilityModifier(sc.wis))})`,
+          `CHA ${sc.cha} (${formatModifier(abilityModifier(sc.cha))})`,
+        ].join(' | ')
+      : '(ability scores unavailable)';
+
+    const spellBlock = fullChar.spellcastingClass
+      ? `\n  Spellcasting: ${fullChar.spellcastingClass} | Ability: ${fullChar.spellcastingAbility ?? '?'} | Save DC: ${fullChar.spellSaveDC ?? '?'} | Attack bonus: ${fullChar.spellAttackBonus != null ? formatModifier(fullChar.spellAttackBonus) : '?'}`
+      : '';
+
+    charBlock =
+      `- ${fullChar.characterName} (${fullChar.race} ${fullChar.class} Level ${fullChar.level})` +
+      `\n  AC: ${fullChar.armorClass} | HP: ${fullChar.currentHitPoints}/${fullChar.hitPointMaximum}${fullChar.temporaryHitPoints ? ` (${fullChar.temporaryHitPoints} temp)` : ''} | Speed: ${fullChar.speed}ft` +
+      `\n  Initiative: ${formatModifier(fullChar.initiative ?? (sc ? abilityModifier(sc.dex) : 0))} | Proficiency Bonus: +${fullChar.proficiencyBonus}` +
+      `\n  Ability Scores: ${abilityBlock}` +
+      (fullChar.background ? `\n  Background: ${fullChar.background}` : '') +
+      (fullChar.alignment ? ` | Alignment: ${fullChar.alignment}` : '') +
+      spellBlock +
+      (fullChar.equipment ? `\n  Equipment: ${fullChar.equipment.slice(0, 300)}` : '') +
+      (fullChar.traits ? `\n  Traits: ${fullChar.traits.slice(0, 200)}` : '');
+  } else if (characters.length > 0) {
+    charBlock = characters
+      .map(
+        c =>
+          `- ${c.characterName} (${c.race} ${c.class} ${c.level}, AC ${c.armorClass}, HP ${c.hitPointMaximum})` +
+          (c.traits ? ` | Traits: ${c.traits.slice(0, 200)}` : ''),
+      )
+      .join('\n');
+  } else {
+    charBlock = 'No characters registered yet. A player may introduce themselves during the session.';
+  }
+
+  const chars = `PARTY — USE THESE STATS FOR ALL CHECKS AND ROLLS. DO NOT INVENT OR RECALCULATE MODIFIERS:\n${charBlock}`;
 
   // ─ 5. Rules strictness ─────────────────────────────────────────────
   const strictnessLevel = options.rulesStrictness ?? 3;
@@ -132,14 +175,17 @@ ${VERBOSITY_INSTRUCTIONS[verbosityLevel]}`;
   // ─ 8. Critical rolls ───────────────────────────────────────────────
   const crits = CRITICAL_ROLL_RULES;
 
-  // ─ 9. Safety ────────────────────────────────────────────────────────
+  // ─ 9. Dice roll handling ───────────────────────────────────────────
+  const diceRules = DICE_ROLL_RULES;
+
+  // ─ 10. Safety ────────────────────────────────────────────────────────
   const safetyInstructions: Record<string, string> = {
     strict: 'Content safety is set to STRICT. Avoid all violence beyond mild fantasy combat, any sexual content, graphic horror, real-world hate speech, or disturbing themes. This is a family-friendly table.',
     balanced: 'Content safety is set to BALANCED. Mature fantasy themes (moral ambiguity, intense combat, dark villains) are acceptable. Avoid explicit sexual content, gratuitous gore, or real-world hate speech.',
   };
   const safety = safetyInstructions[options.safetyMode];
 
-  // ─ 10. Behaviour rules ──────────────────────────────────────────────
+  // ─ 11. Behaviour rules ──────────────────────────────────────────────
   const behaviour = `BEHAVIOUR RULES:
 - Always stay in character as the DM. Never break the fourth wall unless the player explicitly asks an out-of-character question (prefixed with OOC:).
 - When a player types "__OPEN_SCENE__", open the first scene immediately with vivid narrative. Do not ask questions first.
@@ -159,6 +205,7 @@ ${VERBOSITY_INSTRUCTIONS[verbosityLevel]}`;
     narrative,
     verbosity,
     crits,
+    diceRules,
     safety,
     behaviour,
   ].join('\n\n---\n\n');

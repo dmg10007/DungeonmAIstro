@@ -10,6 +10,7 @@ import { roll, abilityModifier, formatModifier } from '../lib/dice';
 import type { Character, DiceRollResult } from '../lib/schemas';
 
 // 'event' is a local-only role for dice rolls and game events.
+// 'dm_notify' is a message sent silently to the DM — never shown in the chat UI.
 interface Message {
   role: 'user' | 'assistant' | 'event';
   content: string;
@@ -52,10 +53,9 @@ function buildCritMessage(result: DiceRollResult, critType: 'nat20' | 'nat1'): s
 
 function buildRollNotifyMessage(result: DiceRollResult): string {
   const label = result.reason ? ` for ${result.reason}` : '';
-  const rollStr = result.rolls.length > 1
-    ? `[${result.rolls.join(', ')}], total ${result.total}`
-    : `${result.total}`;
-  return `[DICE ROLL] I rolled ${result.notation}${label}: ${rollStr}. Please incorporate this result into the narrative as appropriate.`;
+  // The total is the FINAL result including any modifier already baked in by the dice roller.
+  // We tell the DM clearly so it does not add a second modifier.
+  return `[DICE ROLL] I rolled ${result.notation}${label}: final result is ${result.total} (already includes all modifiers). Please incorporate this result into the narrative as appropriate — do NOT add any additional modifiers.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,13 +354,26 @@ export default function Play() {
     );
   }
 
-  async function doSend(text: string, passphrase: string, persist = true) {
+  // Send a message to the DM without showing it in the player's chat.
+  // persist=false so it is also not saved to campaign history as a user message.
+  async function doSendSilent(text: string, passphrase: string) {
+    await doSend(text, passphrase, /* persist= */ false, /* showInChat= */ false);
+  }
+
+  async function doSend(
+    text: string,
+    passphrase: string,
+    persist = true,
+    showInChat = true,
+  ) {
     if (!text.trim() || loading) return;
     setLoading(true);
     setDmError(null);
     setStreamingText('');
-    const userMsg: Message = { role: 'user', content: text.trim(), timestamp: new Date().toISOString() };
-    setMessages(m => [...m, userMsg]);
+    if (showInChat) {
+      const userMsg: Message = { role: 'user', content: text.trim(), timestamp: new Date().toISOString() };
+      setMessages(m => [...m, userMsg]);
+    }
     abortRef.current = new AbortController();
     await sendToDM(
       text.trim(), passphrase,
@@ -438,6 +451,7 @@ export default function Play() {
     let eventLabel = '';
     if (crit === 'nat20') eventLabel = ' ✨ CRITICAL SUCCESS!';
     else if (crit === 'nat1') eventLabel = ' 💀 CRITICAL FAILURE!';
+    // Always show the dice roll event in the chat
     setMessages(m => [...m, {
       role: 'event',
       content: `🎲 **${result.actorType === 'player' ? 'You rolled' : 'Rolled'}** ${result.notation}: **${result.total}** [${result.rolls.join(', ')}]${result.reason ? ` — *${result.reason}*` : ''}${eventLabel}`,
@@ -445,11 +459,13 @@ export default function Play() {
     }]);
     if (crit) {
       const critMsg = buildCritMessage(result, crit);
+      // Crit messages ARE shown in chat (they come from the user describing the crit)
       if (passphraseRef.current) { doSend(critMsg, passphraseRef.current, false); }
       else { setPendingInput(critMsg); setPassphraseError(null); setShowPassphrase(true); }
     } else if (notifyDMOnRoll) {
+      // Non-crit DM notify: send silently — do NOT show the raw [DICE ROLL] prompt in the user's chat
       const notifyMsg = buildRollNotifyMessage(result);
-      if (passphraseRef.current) { doSend(notifyMsg, passphraseRef.current, false); }
+      if (passphraseRef.current) { doSendSilent(notifyMsg, passphraseRef.current); }
       else { setPendingInput(notifyMsg); setPassphraseError(null); setShowPassphrase(true); }
     }
   }
