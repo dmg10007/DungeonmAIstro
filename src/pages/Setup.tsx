@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adventureOptionsSchema } from '../lib/schemas';
-import type { AdventureOptions } from '../lib/schemas';
+import type { AdventureOptions, Ruleset } from '../lib/schemas';
 import { createCampaign } from '../lib/storage';
 
 const TONES = ['Heroic', 'Dark', 'Humorous', 'Mysterious', 'Action-packed', 'Political', 'Exploration', 'Horror'];
@@ -11,8 +11,41 @@ const LENGTHS: Record<string, string> = {
   'Full campaign (10+ sessions)': 'full_campaign',
 };
 
+const RULESET_OPTIONS: { id: Ruleset; label: string; description: string; icon: string }[] = [
+  {
+    id: 'dnd5e',
+    label: 'D&D 5e',
+    description: 'Dungeons & Dragons 5th Edition — heroic fantasy, d20 resolution, classes & levels.',
+    icon: '⚔️',
+  },
+  {
+    id: 'pathfinder2e',
+    label: 'Pathfinder 2e',
+    description: 'Pathfinder 2nd Edition — tactical fantasy, three-action economy, four degrees of success.',
+    icon: '🔱',
+  },
+  {
+    id: 'callofcthulhu7e',
+    label: 'Call of Cthulhu',
+    description: 'CoC 7th Edition — cosmic horror investigation, percentile skills, sanity erosion.',
+    icon: '🐙',
+  },
+  {
+    id: 'shadowrun6e',
+    label: 'Shadowrun 6e',
+    description: 'Shadowrun 6th Edition — cyberpunk urban fantasy, dice pool d6s, Edge meta-currency.',
+    icon: '🤖',
+  },
+  {
+    id: 'custom',
+    label: 'Custom',
+    description: 'Describe your own homebrew or unsupported system. The DM will run it as you define it.',
+    icon: '🎲',
+  },
+];
+
 const RULES_LABELS: Record<number, { label: string; description: string }> = {
-  1: { label: 'By the Book', description: 'Strict RAW — all 5e rules enforced accurately. Misunderstandings corrected gently but precisely.' },
+  1: { label: 'By the Book', description: 'Strict RAW — all rules enforced accurately. Misunderstandings corrected gently but precisely.' },
   2: { label: 'Mostly RAW', description: 'Rules as written with minor common-table rulings allowed.' },
   3: { label: 'Balanced', description: "Rules as intended — bent for fun when it doesn't break balance." },
   4: { label: 'Flexible', description: 'Rules are guidelines. Player agency and narrative take priority.' },
@@ -37,6 +70,9 @@ const VERBOSITY_LABELS: Record<number, { label: string; description: string }> =
 
 export default function Setup() {
   const navigate = useNavigate();
+  const [ruleset, setRuleset] = useState<Ruleset>('dnd5e');
+  const [customRulesetName, setCustomRulesetName] = useState('');
+  const [customRulesetDescription, setCustomRulesetDescription] = useState('');
   const [mode, setMode] = useState<'one_shot' | 'campaign'>('one_shot');
   const [playerCount, setPlayerCount] = useState(1);
   const [experienceLevel, setExperienceLevel] = useState<AdventureOptions['experienceLevel']>('new');
@@ -55,7 +91,21 @@ export default function Setup() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const options = { mode, playerCount, experienceLevel, tone, desiredLength, settingPrompt, safetyMode, rulesStrictness, narrativeStyle, responseVerbosity };
+    const options = {
+      ruleset,
+      customRulesetName: ruleset === 'custom' ? customRulesetName : undefined,
+      customRulesetDescription: ruleset === 'custom' ? customRulesetDescription : undefined,
+      mode,
+      playerCount,
+      experienceLevel,
+      tone,
+      desiredLength,
+      settingPrompt,
+      safetyMode,
+      rulesStrictness,
+      narrativeStyle,
+      responseVerbosity,
+    };
     const parsed = adventureOptionsSchema.safeParse(options);
     if (!parsed.success) { setError(parsed.error.errors[0].message); return; }
     const title = settingPrompt.slice(0, 60) || `${mode === 'one_shot' ? 'One-shot' : 'Campaign'} — ${new Date().toLocaleDateString()}`;
@@ -63,14 +113,81 @@ export default function Setup() {
     navigate('/characters');
   }
 
+  const sectionLabel: React.CSSProperties = { fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--space-2)', display: 'block' };
+
   return (
     <div style={{ maxWidth: 'var(--content-narrow)', margin: '0 auto', padding: 'var(--space-12) var(--space-6)' }}>
       <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-xl)', marginBottom: 'var(--space-6)', color: 'var(--color-primary)' }}>Configure Your Adventure</h1>
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
 
-        {/* Mode */}
+        {/* ── Ruleset picker ─────────────────────────────────── */}
         <fieldset style={{ border: 'none', padding: 0 }}>
-          <legend style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Adventure Type</legend>
+          <legend style={sectionLabel}>Game System</legend>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 'var(--space-2)' }}>
+            {RULESET_OPTIONS.map(opt => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setRuleset(opt.id)}
+                title={opt.description}
+                aria-pressed={ruleset === opt.id}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 'var(--space-1)',
+                  padding: 'var(--space-3) var(--space-2)',
+                  borderRadius: 'var(--radius-md)',
+                  border: `2px solid ${ruleset === opt.id ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                  background: ruleset === opt.id ? 'var(--color-primary-highlight)' : 'var(--color-surface)',
+                  cursor: 'pointer',
+                  transition: 'border-color var(--transition-interactive), background var(--transition-interactive)',
+                }}
+              >
+                <span style={{ fontSize: '1.5rem' }}>{opt.icon}</span>
+                <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: ruleset === opt.id ? 'var(--color-primary)' : 'var(--color-text)' }}>{opt.label}</span>
+              </button>
+            ))}
+          </div>
+          {/* Description of selected ruleset */}
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
+            {RULESET_OPTIONS.find(o => o.id === ruleset)?.description}
+          </p>
+          {/* Custom ruleset fields */}
+          {ruleset === 'custom' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
+              <div>
+                <label htmlFor="customName" style={sectionLabel}>Ruleset Name</label>
+                <input
+                  id="customName"
+                  className="input"
+                  maxLength={80}
+                  placeholder="e.g. My Homebrew System, Blades in the Dark, OSE..."
+                  value={customRulesetName}
+                  onChange={e => setCustomRulesetName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label htmlFor="customDesc" style={sectionLabel}>Ruleset Description</label>
+                <textarea
+                  id="customDesc"
+                  className="input"
+                  rows={5}
+                  maxLength={2000}
+                  placeholder="Describe the core resolution mechanic, key systems, and any rules you want the DM to enforce..."
+                  value={customRulesetDescription}
+                  onChange={e => setCustomRulesetDescription(e.target.value)}
+                  style={{ resize: 'vertical' }}
+                />
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'right' }}>{customRulesetDescription.length}/2000</div>
+              </div>
+            </div>
+          )}
+        </fieldset>
+
+        {/* ── Mode ───────────────────────────────────────────── */}
+        <fieldset style={{ border: 'none', padding: 0 }}>
+          <legend style={sectionLabel}>Adventure Type</legend>
           <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
             {(['one_shot', 'campaign'] as const).map(m => (
               <button key={m} type="button" onClick={() => setMode(m)}
@@ -81,9 +198,11 @@ export default function Setup() {
           </div>
         </fieldset>
 
-        {/* Players */}
+        {/* ── Players ────────────────────────────────────────── */}
         <div>
-          <label htmlFor="playerCount" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-2)' }}>Number of Players: {playerCount}</label>
+          <label htmlFor="playerCount" style={{ ...sectionLabel, display: 'flex', justifyContent: 'space-between' }}>
+            <span>Number of Players</span><span style={{ color: 'var(--color-primary)', fontWeight: 700 }}>{playerCount}</span>
+          </label>
           <input id="playerCount" type="range" min={1} max={4} value={playerCount}
             onChange={e => setPlayerCount(Number(e.target.value))}
             style={{ width: '100%', accentColor: 'var(--color-primary)' }}
@@ -91,9 +210,9 @@ export default function Setup() {
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}><span>1</span><span>4</span></div>
         </div>
 
-        {/* Experience level */}
+        {/* ── Experience level ───────────────────────────────── */}
         <fieldset style={{ border: 'none', padding: 0 }}>
-          <legend style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Player Experience</legend>
+          <legend style={sectionLabel}>Player Experience</legend>
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             {(['new', 'intermediate', 'expert'] as const).map(lvl => (
               <button key={lvl} type="button" onClick={() => setExperienceLevel(lvl)}
@@ -104,9 +223,9 @@ export default function Setup() {
           </div>
         </fieldset>
 
-        {/* Tone */}
+        {/* ── Tone ───────────────────────────────────────────── */}
         <fieldset style={{ border: 'none', padding: 0 }}>
-          <legend style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Adventure Tone (pick any)</legend>
+          <legend style={sectionLabel}>Adventure Tone (pick any)</legend>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
             {TONES.map(t => (
               <button key={t} type="button" onClick={() => toggleTone(t)}
@@ -117,24 +236,21 @@ export default function Setup() {
           </div>
         </fieldset>
 
-        {/* Length */}
+        {/* ── Length ─────────────────────────────────────────── */}
         <div>
-          <label htmlFor="length" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-2)' }}>Adventure Length</label>
+          <label htmlFor="length" style={sectionLabel}>Adventure Length</label>
           <select id="length" className="input" value={desiredLength} onChange={e => setDesiredLength(e.target.value)}>
             {Object.keys(LENGTHS).map(l => <option key={l} value={l}>{l}</option>)}
           </select>
         </div>
 
-        {/* Rules Strictness slider */}
+        {/* ── Rules Strictness ───────────────────────────────── */}
         <div>
           <label htmlFor="rulesStrictness" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
             <span>Rules Strictness</span>
             <span style={{ color: 'var(--color-primary)' }}>{RULES_LABELS[rulesStrictness].label}</span>
           </label>
-          <input
-            id="rulesStrictness"
-            type="range" min={1} max={5} step={1}
-            value={rulesStrictness}
+          <input id="rulesStrictness" type="range" min={1} max={5} step={1} value={rulesStrictness}
             onChange={e => setRulesStrictness(Number(e.target.value))}
             style={{ width: '100%', accentColor: 'var(--color-primary)' }}
             aria-valuetext={RULES_LABELS[rulesStrictness].label}
@@ -142,21 +258,16 @@ export default function Setup() {
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-1)' }}>
             <span>By the Book</span><span>Rule of Cool</span>
           </div>
-          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
-            {RULES_LABELS[rulesStrictness].description}
-          </p>
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>{RULES_LABELS[rulesStrictness].description}</p>
         </div>
 
-        {/* Narrative Style slider */}
+        {/* ── Narrative Style ────────────────────────────────── */}
         <div>
           <label htmlFor="narrativeStyle" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
             <span>Narrative Style</span>
             <span style={{ color: 'var(--color-primary)' }}>{NARRATIVE_LABELS[narrativeStyle].label}</span>
           </label>
-          <input
-            id="narrativeStyle"
-            type="range" min={1} max={5} step={1}
-            value={narrativeStyle}
+          <input id="narrativeStyle" type="range" min={1} max={5} step={1} value={narrativeStyle}
             onChange={e => setNarrativeStyle(Number(e.target.value))}
             style={{ width: '100%', accentColor: 'var(--color-primary)' }}
             aria-valuetext={NARRATIVE_LABELS[narrativeStyle].label}
@@ -164,21 +275,16 @@ export default function Setup() {
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-1)' }}>
             <span>Pure Narrative</span><span>Dice Heavy</span>
           </div>
-          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
-            {NARRATIVE_LABELS[narrativeStyle].description}
-          </p>
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>{NARRATIVE_LABELS[narrativeStyle].description}</p>
         </div>
 
-        {/* Response Verbosity slider */}
+        {/* ── Response Verbosity ─────────────────────────────── */}
         <div>
           <label htmlFor="responseVerbosity" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
             <span>DM Response Length</span>
             <span style={{ color: 'var(--color-primary)' }}>{VERBOSITY_LABELS[responseVerbosity].label}</span>
           </label>
-          <input
-            id="responseVerbosity"
-            type="range" min={1} max={5} step={1}
-            value={responseVerbosity}
+          <input id="responseVerbosity" type="range" min={1} max={5} step={1} value={responseVerbosity}
             onChange={e => setResponseVerbosity(Number(e.target.value))}
             style={{ width: '100%', accentColor: 'var(--color-primary)' }}
             aria-valuetext={VERBOSITY_LABELS[responseVerbosity].label}
@@ -186,14 +292,12 @@ export default function Setup() {
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-1)' }}>
             <span>Terse</span><span>Verbose</span>
           </div>
-          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
-            {VERBOSITY_LABELS[responseVerbosity].description}
-          </p>
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>{VERBOSITY_LABELS[responseVerbosity].description}</p>
         </div>
 
-        {/* Custom prompt */}
+        {/* ── Custom prompt ──────────────────────────────────── */}
         <div>
-          <label htmlFor="prompt" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-2)' }}>Adventure Prompt (optional)</label>
+          <label htmlFor="prompt" style={sectionLabel}>Adventure Prompt (optional)</label>
           <textarea id="prompt" className="input" rows={4} maxLength={4000}
             value={settingPrompt} onChange={e => setSettingPrompt(e.target.value)}
             placeholder="Describe your ideal adventure — setting, villains, themes, anything..."
@@ -202,9 +306,9 @@ export default function Setup() {
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'right' }}>{settingPrompt.length}/4000</div>
         </div>
 
-        {/* Safety mode */}
+        {/* ── Safety mode ────────────────────────────────────── */}
         <fieldset style={{ border: 'none', padding: 0 }}>
-          <legend style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Content Safety</legend>
+          <legend style={sectionLabel}>Content Safety</legend>
           <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
             {(['strict', 'balanced'] as const).map(s => (
               <button key={s} type="button" onClick={() => setSafetyMode(s)}

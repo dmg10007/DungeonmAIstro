@@ -24,6 +24,18 @@ export const apiKeyEntrySchema = z.object({
 export type ApiKeyEntry = z.infer<typeof apiKeyEntrySchema>;
 
 // ----------------------------------------------------------------
+// Ruleset
+// ----------------------------------------------------------------
+export const Ruleset = z.enum([
+  'dnd5e',
+  'pathfinder2e',
+  'callofcthulhu7e',
+  'shadowrun6e',
+  'custom',
+]);
+export type Ruleset = z.infer<typeof Ruleset>;
+
+// ----------------------------------------------------------------
 // Dice
 // ----------------------------------------------------------------
 export const dieFaceSchema = z.union([
@@ -105,6 +117,11 @@ export type Character = z.infer<typeof characterSchema>;
 // Adventure / Campaign
 // ----------------------------------------------------------------
 export const adventureOptionsSchema = z.object({
+  /** Which TTRPG ruleset the DM should run. Immutable after campaign creation. */
+  ruleset: Ruleset.default('dnd5e'),
+  /** Display name / short description for a custom homebrew ruleset. */
+  customRulesetName: z.string().max(80).optional(),
+  customRulesetDescription: z.string().max(2000).optional(),
   mode: z.enum(['one_shot', 'campaign']),
   playerCount: z.number().int().min(1).max(4),
   experienceLevel: z.enum(['new', 'intermediate', 'expert']),
