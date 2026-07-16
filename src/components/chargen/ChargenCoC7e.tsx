@@ -66,7 +66,6 @@ const QUICK_BUILD_DEFAULTS: Record<CocKey, number> = {
   str: 50, con: 50, siz: 55, dex: 55, app: 50, int: 65, pow: 50, edu: 65,
 };
 
-// ── CoC 7e roll formulas: 3d6×5 or (2d6+6)×5 ──────────────────────────────────
 function rollCoC(is2d6plus6: boolean): number {
   const roll = is2d6plus6
     ? Math.floor(Math.random() * 6) + 1 + Math.floor(Math.random() * 6) + 1 + 6
@@ -82,7 +81,6 @@ function rollAllStats(): Record<CocKey, number> {
   };
 }
 
-// ── Weighted roll profiles ────────────────────────────────────────────────────
 interface CoCProfile { id: string; label: string; desc: string; priority: CocKey[] }
 const COC_PROFILES: CoCProfile[] = [
   {
@@ -106,7 +104,6 @@ const COC_PROFILES: CoCProfile[] = [
 ];
 
 function weightedCoCRoll(profile: CoCProfile): Record<CocKey, number> {
-  // Roll all 8 raw values using proper CoC formulas
   const is2d6plus6: Record<CocKey, boolean> = {
     str: false, con: false, siz: true,
     dex: false, app: false, int: true,
@@ -116,15 +113,21 @@ function weightedCoCRoll(profile: CoCProfile): Record<CocKey, number> {
     key: k,
     val: rollCoC(is2d6plus6[k]),
   }));
-  // Sort raw values descending
   const sorted = [...rawValues].sort((a, b) => b.val - a.val);
-  // Assign highest value to highest-priority stat
   const result = {} as Record<CocKey, number>;
   profile.priority.forEach((k, i) => {
     result[k] = sorted[i]?.val ?? 50;
   });
   return result;
 }
+
+// Tab definitions — label kept short so all four fit on one line at ~640px+
+const TABS: { id: GenMethod; icon: string; label: string }[] = [
+  { id: 'point_buy',     icon: '⚖',  label: 'Point Buy'     },
+  { id: 'quick_build',   icon: '⚡', label: 'Quick Build'   },
+  { id: 'manual_roll',   icon: '🎲', label: 'Manual Roll'   },
+  { id: 'weighted_roll', icon: '⚖️', label: 'Weighted Roll' },
+];
 
 export default function ChargenCoC7e({ onCreated }: ChargenProps) {
   const [genMethod, setGenMethod] = useState<GenMethod>('point_buy');
@@ -197,6 +200,13 @@ export default function ChargenCoC7e({ onCreated }: ChargenProps) {
     const diff = newVal - stats[key];
     if (diff > 0 && pointsLeft - diff < 0) return;
     setStat(key, newVal);
+  }
+
+  function handleTabClick(m: GenMethod) {
+    if (m === 'point_buy')     handleResetPoints();
+    else if (m === 'quick_build')   handleQuickBuild();
+    else if (m === 'manual_roll')   handleManualRoll();
+    else { setGenMethod('weighted_roll'); setRollNote(''); }
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -293,28 +303,36 @@ export default function ChargenCoC7e({ onCreated }: ChargenProps) {
           <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-lg)', letterSpacing: '0.05em', margin: 0 }}>Characteristics</h2>
         </div>
 
-        {/* Generation method tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border)', overflowX: 'auto' }}>
-          {(['point_buy', 'quick_build', 'manual_roll', 'weighted_roll'] as GenMethod[]).map(m => (
+        {/* Generation method tabs — flex-wrap so they never overflow horizontally */}
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          borderBottom: '1px solid var(--color-border)',
+        }}>
+          {TABS.map(({ id, icon, label }) => (
             <button
-              key={m}
+              key={id}
               type="button"
-              onClick={() => {
-                if (m === 'point_buy') handleResetPoints();
-                else if (m === 'quick_build') handleQuickBuild();
-                else if (m === 'manual_roll') handleManualRoll();
-                else { setGenMethod('weighted_roll'); setRollNote(''); }
-              }}
+              onClick={() => handleTabClick(id)}
               style={{
-                flex: '0 0 auto', padding: 'var(--space-2) var(--space-3)', fontSize: 'var(--text-xs)', fontWeight: 600,
-                textTransform: 'uppercase', letterSpacing: '0.06em', cursor: 'pointer', border: 'none',
+                flex: '1 1 auto',
+                minWidth: 0,
+                padding: 'var(--space-2) var(--space-3)',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                cursor: 'pointer',
+                border: 'none',
                 borderRight: '1px solid var(--color-border)',
-                background: genMethod === m ? 'var(--color-primary)' : 'var(--color-surface)',
-                color: genMethod === m ? 'var(--color-text-inverse)' : 'var(--color-text-muted)',
+                borderBottom: '1px solid var(--color-border)',
+                background: genMethod === id ? 'var(--color-primary)' : 'var(--color-surface)',
+                color: genMethod === id ? 'var(--color-text-inverse)' : 'var(--color-text-muted)',
                 transition: 'background 180ms ease, color 180ms ease',
+                whiteSpace: 'nowrap',
               }}
             >
-              {m === 'point_buy' ? '⚖ Point Buy' : m === 'quick_build' ? '⚡ Quick Build' : m === 'manual_roll' ? '🎲 Manual Roll' : '⚖️ Weighted Roll'}
+              {icon} {label}
             </button>
           ))}
         </div>
