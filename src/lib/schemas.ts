@@ -64,12 +64,17 @@ export type DiceRollResult = z.infer<typeof diceRollResultSchema>;
 // Character
 // ----------------------------------------------------------------
 export const abilityScoresSchema = z.object({
-  str: z.number().int().min(1).max(30),
-  dex: z.number().int().min(1).max(30),
-  con: z.number().int().min(1).max(30),
-  int: z.number().int().min(1).max(30),
-  wis: z.number().int().min(1).max(30),
-  cha: z.number().int().min(1).max(30),
+  // Upper bound is 100 to accommodate all supported rulesets:
+  //   D&D 5e / PF2e: ability scores cap around 30
+  //   Shadowrun 6e: attributes cap at 9 (stored as-is)
+  //   Call of Cthulhu 7e: characteristics go up to 90 (3d6×5 / (2d6+6)×5)
+  //   Headroom kept to 100 for homebrew flexibility.
+  str: z.number().int().min(1).max(100),
+  dex: z.number().int().min(1).max(100),
+  con: z.number().int().min(1).max(100),
+  int: z.number().int().min(1).max(100),
+  wis: z.number().int().min(1).max(100),
+  cha: z.number().int().min(1).max(100),
 });
 export type AbilityScores = z.infer<typeof abilityScoresSchema>;
 

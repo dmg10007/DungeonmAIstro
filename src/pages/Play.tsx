@@ -736,9 +736,11 @@ export default function Play() {
       </div>
 
       <style>{`
+        /* ── Play screen layout ─────────────────────────────────────────────── */
         .play-grid {
           display: grid;
-          grid-template-columns: 1fr 300px;
+          /* chat takes remaining space; sidebar has a fluid min of 260px, max 300px */
+          grid-template-columns: 1fr clamp(260px, 25vw, 300px);
           gap: var(--space-6);
           height: calc(100dvh - 64px);
           max-width: var(--content-wide);
@@ -747,6 +749,7 @@ export default function Play() {
           box-sizing: border-box;
           overflow: hidden;
         }
+
         .play-chat-col {
           display: flex;
           flex-direction: column;
@@ -754,6 +757,7 @@ export default function Play() {
           min-height: 0;
           overflow: hidden;
         }
+
         .play-sidebar {
           display: flex;
           flex-direction: column;
@@ -761,11 +765,55 @@ export default function Play() {
           overflow-y: auto;
           min-height: 0;
         }
-        @media (max-width: 768px) {
-          .play-grid { grid-template-columns: 1fr; height: auto; overflow: visible; }
-          .play-chat-col { height: calc(100dvh - 64px); overflow: hidden; }
-          .play-sidebar { overflow: visible; min-height: auto; }
+
+        /* ── Tablet (768–1024px): sidebar moves below chat ─────────────────── */
+        @media (max-width: 1024px) {
+          .play-grid {
+            grid-template-columns: 1fr;
+            height: auto;
+            overflow: visible;
+            padding: var(--space-4) var(--space-4);
+            gap: var(--space-4);
+          }
+          /* Chat column gets a fixed viewport-relative height so it stays
+             scrollable while the sidebar flows naturally below it */
+          .play-chat-col {
+            height: clamp(420px, 60dvh, 720px);
+            overflow: hidden;
+          }
+          .play-sidebar {
+            overflow: visible;
+            min-height: auto;
+            /* On tablet/mobile render sidebar as a 2-col grid of cards */
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+            gap: var(--space-3);
+            align-items: start;
+          }
+          /* Tool button row and expandable panels span the full sidebar width */
+          .play-sidebar > div:first-child {
+            grid-column: 1 / -1;
+          }
+          .play-sidebar > .card:has(> .dice-roller),
+          .play-sidebar > .card:has(> .combat-tracker),
+          .play-sidebar > .card:has(> [class*="CharacterSheet"]) {
+            grid-column: 1 / -1;
+          }
         }
+
+        /* ── Mobile (<600px): single column, tighter padding ───────────────── */
+        @media (max-width: 600px) {
+          .play-grid {
+            padding: var(--space-3) var(--space-3);
+          }
+          .play-chat-col {
+            height: clamp(360px, 55dvh, 560px);
+          }
+          .play-sidebar {
+            grid-template-columns: 1fr;
+          }
+        }
+
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
         blockquote {
           border-left: 3px solid var(--color-primary);
