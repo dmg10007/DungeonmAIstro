@@ -63,12 +63,39 @@ export type DiceRollResult = z.infer<typeof diceRollResultSchema>;
 // ----------------------------------------------------------------
 // Character
 // ----------------------------------------------------------------
+//
+// Numeric bounds are intentionally wide so the schema works across all
+// supported rulesets without per-system branching:
+//
+//   Ability scores / characteristics
+//     D&D 5e / PF2e : 1–30
+//     Shadowrun 6e  : 1–9  (stored as-is)
+//     CoC 7e        : 1–90 (3d6×5 etc.)
+//     → max 100 for homebrew headroom
+//
+//   Proficiency bonus
+//     D&D 5e / PF2e : 2–6
+//     CoC 7e / SR6e : concept does not exist → 0
+//     → min 0, max 12
+//
+//   Armor Class / Defence
+//     D&D 5e        : typically 10–30
+//     CoC 7e        : Dodge % can be 0–99
+//     → min 0, max 99
+//
+//   Level / Era / Rank
+//     D&D 5e        : 1–20
+//     PF2e          : 1–20
+//     CoC 7e        : no levels (store 1)
+//     SR6e          : Karma track, no hard cap
+//     → min 0 (so CoC characters don't fail), max 30
+//
+//   Speed
+//     D&D 5e        : 0–120 ft
+//     CoC 7e        : MOV stored as 1–99
+//     → min 0, max 999
+
 export const abilityScoresSchema = z.object({
-  // Upper bound is 100 to accommodate all supported rulesets:
-  //   D&D 5e / PF2e: ability scores cap around 30
-  //   Shadowrun 6e: attributes cap at 9 (stored as-is)
-  //   Call of Cthulhu 7e: characteristics go up to 90 (3d6×5 / (2d6+6)×5)
-  //   Headroom kept to 100 for homebrew flexibility.
   str: z.number().int().min(1).max(100),
   dex: z.number().int().min(1).max(100),
   con: z.number().int().min(1).max(100),
@@ -86,13 +113,17 @@ export const characterSchema = z.object({
   class: z.string().min(1).max(50),
   background: z.string().max(50).optional(),
   alignment: z.string().max(30).optional(),
-  level: z.number().int().min(1).max(20),
+  // min(0) — rulesets without levels (CoC 7e) store 0 or 1
+  level: z.number().int().min(0).max(30),
   experiencePoints: z.number().int().min(0).optional(),
   abilityScores: abilityScoresSchema,
-  proficiencyBonus: z.number().int().min(2).max(6),
-  armorClass: z.number().int().min(0).max(30),
+  // min(0) — rulesets without a proficiency bonus (CoC 7e, SR6e) store 0
+  proficiencyBonus: z.number().int().min(0).max(12),
+  // max(99) — CoC 7e Dodge skill is a percentage
+  armorClass: z.number().int().min(0).max(99),
   initiative: z.number().int().optional(),
-  speed: z.number().int().min(0).max(120),
+  // max(999) — covers ft (D&D) and MOV values (CoC)
+  speed: z.number().int().min(0).max(999),
   hitPointMaximum: z.number().int().min(1).max(999),
   currentHitPoints: z.number().int().min(0).max(999),
   temporaryHitPoints: z.number().int().min(0).max(999).optional(),
