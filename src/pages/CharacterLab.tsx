@@ -1,31 +1,25 @@
-import { useMemo, useState } from 'react';
+/**
+ * CharacterLab — thin dispatcher.
+ *
+ * Reads the active campaign's ruleset and mounts the correct
+ * game-specific chargen component via React.lazy so unused rulesets
+ * cost nothing at startup.
+ */
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { characterSchema, type Ruleset } from '../lib/schemas';
-import type { Character } from '../lib/schemas';
-import { newId, saveCharacter, getActiveCampaignId, loadCampaign } from '../lib/storage';
-import { addCharacterToActiveCampaign } from '../lib/storageHelpers';
+import type { Ruleset, Character } from '../lib/schemas';
 import { abilityModifier, formatModifier } from '../lib/dice';
-import {
-  ABILITY_KEYS,
-  emptyScores,
-  getDefaultAC,
-  getDefaultHP,
-  getExpectedStatBudget,
-  getPointBuySpent,
-  getStandardArrayScores,
-  getStatBudgetWarning,
-  randomizeStatBlock,
-  rollStatBlock,
-  type AbilityKey,
-  type AbilityScores,
-} from '../lib/chargen';
-import {
-  getClassFeaturesUpToLevel,
-  getBackgroundFeature,
-} from '../lib/classTraits';
+import { getActiveCampaignId, loadCampaign } from '../lib/storage';
 import { getRulesetChargenConfig } from '../lib/rulesets/chargen';
+import type { ChargenProps } from '../components/chargen/types';
 
-// ─── Derive active campaign ruleset (safe fallback to dnd5e) ─────────────────
+// ── Lazy-load each ruleset's chargen ────────────────────────────────────────
+const ChargenDnD5e  = lazy(() => import('../components/chargen/ChargenDnD5e'));
+const ChargenPF2e   = lazy(() => import('../components/chargen/ChargenPF2e'));
+const ChargenCoC7e  = lazy(() => import('../components/chargen/ChargenCoC7e'));
+const ChargenSR6e   = lazy(() => import('../components/chargen/ChargenSR6e'));
+const ChargenCustom = lazy(() => import('../components/chargen/ChargenCustom'));
+
 function getActiveCampaignRuleset(): Ruleset {
   const id = getActiveCampaignId();
   if (!id) return 'dnd5e';
@@ -33,220 +27,24 @@ function getActiveCampaignRuleset(): Ruleset {
   return (campaign?.options?.ruleset as Ruleset) ?? 'dnd5e';
 }
 
-const ALIGNMENTS = ['Lawful Good','Neutral Good','Chaotic Good','Lawful Neutral','True Neutral','Chaotic Neutral','Lawful Evil','Neutral Evil','Chaotic Evil'];
-const STAT_METHODS = ['standard_array', 'point_buy', 'dice_rolls'] as const;
-type StatMethod = typeof STAT_METHODS[number];
-
 export default function CharacterLab() {
-  const navigate = useNavigate();
-  const [tab, setTab] = useState<'create' | 'import'>('create');
+  const navigate  = useNavigate();
+  const ruleset   = useMemo(getActiveCampaignRuleset, []);
+  const cfg       = useMemo(() => getRulesetChargenConfig(ruleset), [ruleset]);
 
-  // Derive config once on mount — ruleset is immutable after campaign creation
-  const ruleset = useMemo(getActiveCampaignRuleset, []);
-  const cfg = useMemo(() => getRulesetChargenConfig(ruleset), [ruleset]);
-
-  const [statMethod, setStatMethod] = useState<StatMethod>('standard_array');
-  const [rolledValues, setRolledValues] = useState<number[]>([]);
-  const [rollDetails, setRollDetails] = useState<string>('');
-  const [randomizeNote, setRandomizeNote] = useState<string>('');
-  const [traitsOpen, setTraitsOpen] = useState(false);
-
-  // Extra fields keyed by ExtraField.key
-  const [extraValues, setExtraValues] = useState<Record<string, number | string>>(
-    () => Object.fromEntries(cfg.extraFields.map(f => [f.key, f.defaultValue]))
-  );
-
-  const [form, setForm] = useState(() => ({
-    characterName: '',
-    playerName: '',
-    race: cfg.species[0] ?? 'Human',
-    class: cfg.classes[4] ?? cfg.classes[0],
-    background: cfg.backgrounds[0] ?? '',
-    alignment: cfg.alignments[0] ?? '',
-    level: 1,
-    abilityScores: cfg.useDndStatMethods
-      ? getStandardArrayScores(cfg.classes[4] ?? cfg.classes[0])
-      : emptyScores(10),
-    armorClass: 10,
-    speed: 30,
-    hitPointMaximum: 10,
-    currentHitPoints: 10,
-    equipment: '',
-    traits: '',
-    ideals: '',
-    bonds: '',
-    flaws: '',
-  }));
-  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab]         = useState<'create' | 'import'>('create');
   const [created, setCreated] = useState<Character | null>(null);
 
-  function set<K extends keyof typeof form>(key: K, val: (typeof form)[K]) {
-    setForm(f => ({ ...f, [key]: val }));
-  }
+  const handleCreated: ChargenProps['onCreated'] = (char) => setCreated(char);
+  function resetForm() { setCreated(null); }
 
-  function setAbility(key: AbilityKey, value: number) {
-    setForm(f => ({ ...f, abilityScores: { ...f.abilityScores, [key]: value } }));
-  }
-
-  function applyStandardArray(className = form.class) {
-    setForm(f => ({ ...f, abilityScores: getStandardArrayScores(className) }));
-    setStatMethod('standard_array');
-    setRolledValues([]);
-    setRollDetails('');
-    setRandomizeNote('');
-  }
-
-  function randomizeStats() {
-    const result = randomizeStatBlock(form.class, form.level);
-    const hp = result.hp;
-    setForm(f => ({
-      ...f,
-      abilityScores: result.scores,
-      armorClass: result.ac,
-      hitPointMaximum: hp,
-      currentHitPoints: hp,
-    }));
-    setRandomizeNote(result.detail);
-    setStatMethod('dice_rolls');
-    const scores = Object.values(result.scores).sort((a, b) => b - a);
-    setRolledValues(scores);
-    setRollDetails(result.detail);
-  }
-
-  function rollStats() {
-    const rolled = rollStatBlock();
-    setRolledValues(rolled.scores);
-    setRollDetails(rolled.rolls.map(r => `[${r.dice.join(', ')}] → ${r.total}`).join(' | '));
-    setStatMethod('dice_rolls');
-    setRandomizeNote('');
-  }
-
-  function assignRolledStats() {
-    if (rolledValues.length !== 6) return;
-    const sorted = [...rolledValues].sort((a, b) => b - a);
-    const assigned = emptyScores(8);
-    const priorityTemplate = getStandardArrayScores(form.class);
-    const sortedAbilities = Object.entries(priorityTemplate)
-      .sort((a, b) => b[1] - a[1])
-      .map(([key]) => key as AbilityKey);
-    sortedAbilities.forEach((ability, idx) => {
-      assigned[ability] = sorted[idx] ?? 8;
-    });
-    const ac = getDefaultAC(form.class, assigned);
-    const hp = getDefaultHP(form.class, form.level, assigned.con);
-    setForm(f => ({ ...f, abilityScores: assigned, armorClass: ac, hitPointMaximum: hp, currentHitPoints: hp }));
-  }
-
-  const pointBuySpent = useMemo(() => getPointBuySpent(form.abilityScores), [form.abilityScores]);
-  const pointBuyRemaining = 27 - pointBuySpent;
-  const statBudgetWarning = useMemo(() => getStatBudgetWarning(form.abilityScores, form.level), [form.abilityScores, form.level]);
-  const expectedBudget = useMemo(() => getExpectedStatBudget(form.level), [form.level]);
-
-  // D&D / PF2e class & background feature preview (only when using D&D class traits)
-  const isDnd5e = ruleset === 'dnd5e';
-  const classFeatures = useMemo(
-    () => isDnd5e ? getClassFeaturesUpToLevel(form.class, Math.min(form.level, 3)) : [],
-    [isDnd5e, form.class, form.level],
-  );
-  const backgroundFeature = useMemo(
-    () => isDnd5e ? getBackgroundFeature(form.background) : null,
-    [isDnd5e, form.background],
-  );
-
-  function handleClassChange(nextClass: string) {
-    if (cfg.useDndStatMethods && statMethod === 'standard_array') {
-      setForm(f => ({ ...f, class: nextClass, abilityScores: getStandardArrayScores(nextClass) }));
-      return;
-    }
-    set('class', nextClass);
-  }
-
-  function handleMethodChange(method: StatMethod) {
-    setStatMethod(method);
-    setError(null);
-    setRandomizeNote('');
-    if (method === 'standard_array') applyStandardArray();
-    if (method === 'point_buy') setForm(f => ({ ...f, abilityScores: emptyScores(8) }));
-    if (method === 'dice_rolls') {
-      setRolledValues([]);
-      setRollDetails('');
-    }
-  }
-
-  function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    if (cfg.useDndStatMethods && statMethod === 'point_buy' && pointBuySpent > 27) {
-      setError(`Point buy is over budget by ${pointBuySpent - 27}.`);
-      return;
-    }
-
-    const profBonus = Math.ceil(form.level / 4) + 1;
-    const now = new Date().toISOString();
-
-    // Encode extra fields into the traits field as structured notes
-    // so they survive the existing characterSchema without a migration.
-    const extraNotes = cfg.extraFields.length > 0
-      ? cfg.extraFields
-          .map(f => `[${f.label}: ${extraValues[f.key] ?? f.defaultValue}]`)
-          .join(' ')
-      : '';
-    const traitsWithExtra = extraNotes
-      ? (form.traits ? `${form.traits}\n${extraNotes}` : extraNotes)
-      : form.traits;
-
-    const candidate = {
-      ...form,
-      traits: traitsWithExtra,
-      id: newId(),
-      proficiencyBonus: profBonus,
-      temporaryHitPoints: 0,
-      source: 'manual' as const,
-      createdAt: now,
-    };
-    const parsed = characterSchema.safeParse(candidate);
-    if (!parsed.success) { setError(parsed.error.errors[0].message); return; }
-
-    saveCharacter(parsed.data);
-    addCharacterToActiveCampaign({
-      id: parsed.data.id,
-      characterName: parsed.data.characterName,
-      class: parsed.data.class,
-      level: parsed.data.level,
-    });
-
-    setCreated(parsed.data);
-    setError(null);
-  }
-
-  function resetForm() {
-    setCreated(null);
-    setExtraValues(Object.fromEntries(cfg.extraFields.map(f => [f.key, f.defaultValue])));
-    setForm({
-      characterName: '', playerName: '',
-      race: cfg.species[0] ?? 'Human',
-      class: cfg.classes[4] ?? cfg.classes[0],
-      background: cfg.backgrounds[0] ?? '',
-      alignment: cfg.alignments[0] ?? '',
-      level: 1,
-      abilityScores: cfg.useDndStatMethods
-        ? getStandardArrayScores(cfg.classes[4] ?? cfg.classes[0])
-        : emptyScores(10),
-      armorClass: 10, speed: 30, hitPointMaximum: 10, currentHitPoints: 10,
-      equipment: '', traits: '', ideals: '', bonds: '', flaws: '',
-    });
-    setStatMethod('standard_array');
-    setRolledValues([]);
-    setRollDetails('');
-    setRandomizeNote('');
-  }
-
-  // ─── Success screen ────────────────────────────────────────────────────────
+  // ── Success screen ────────────────────────────────────────────────────────
   if (created) {
     return (
       <div style={{
         maxWidth: 'var(--content-narrow)', margin: '0 auto',
         padding: 'var(--space-12) var(--space-6)', textAlign: 'center',
-        display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', alignItems: 'center'
+        display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', alignItems: 'center',
       }}>
         <div style={{ fontSize: 'var(--text-xl)', color: 'var(--color-primary)', fontFamily: 'var(--font-display)' }}>
           {created.characterName} is ready!
@@ -254,11 +52,14 @@ export default function CharacterLab() {
         <div className="card" style={{ width: '100%', textAlign: 'left' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>
             <div><strong>{cfg.speciesLabel}:</strong> {created.race}</div>
-            <div><strong>{cfg.classLabel}:</strong> {created.class}{cfg.showLevel ? ` ${created.level}` : ''}</div>
+            <div><strong>{cfg.classLabel}:</strong> {created.class}</div>
             <div><strong>AC:</strong> {created.armorClass}</div>
             <div><strong>HP:</strong> {created.hitPointMaximum}</div>
             {(Object.keys(created.abilityScores) as (keyof typeof created.abilityScores)[]).map((k, i) => (
-              <div key={k}><strong>{cfg.stats[i]?.label ?? k.toUpperCase()}:</strong> {created.abilityScores[k]} ({formatModifier(abilityModifier(created.abilityScores[k]))})</div>
+              <div key={k}>
+                <strong>{cfg.stats[i]?.label ?? k.toUpperCase()}:</strong>{' '}
+                {created.abilityScores[k]} ({formatModifier(abilityModifier(created.abilityScores[k]))})
+              </div>
             ))}
           </div>
         </div>
@@ -270,28 +71,27 @@ export default function CharacterLab() {
     );
   }
 
-  // ─── Main form ─────────────────────────────────────────────────────────────
+  // ── Outer chrome ──────────────────────────────────────────────────────────
   return (
     <div style={{ maxWidth: 'var(--content-narrow)', margin: '0 auto', padding: 'var(--space-12) var(--space-6)' }}>
+      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-6)' }}>
         <div>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-xl)', color: 'var(--color-primary)' }}>Character Lab</h1>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>{cfg.systemName}</div>
         </div>
-        <button
-          className="btn btn-ghost"
-          style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}
-          onClick={() => navigate('/play')}
-        >
+        <button className="btn btn-ghost" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }} onClick={() => navigate('/play')}>
           Skip &rarr; Play without character
         </button>
       </div>
 
+      {/* Create / Import tabs */}
       <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-6)' }}>
         <button className={`btn ${tab === 'create' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('create')}>Create Character</button>
         <button className={`btn ${tab === 'import' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('import')}>Import PDF</button>
       </div>
 
+      {/* PDF import placeholder */}
       {tab === 'import' && (
         <div className="card" style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
           <div style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-3)' }}>PDF Import</div>
@@ -306,295 +106,19 @@ export default function CharacterLab() {
         </div>
       )}
 
+      {/* Game-specific chargen — lazy loaded per ruleset */}
       {tab === 'create' && (
-        <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-
-          {/* Character name / player name */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-            <div>
-              <label htmlFor="charName" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>Character Name *</label>
-              <input id="charName" required className="input" value={form.characterName} onChange={e => set('characterName', e.target.value)} placeholder="e.g. Aric Stormborn" />
-            </div>
-            <div>
-              <label htmlFor="playerName" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>Player Name</label>
-              <input id="playerName" className="input" value={form.playerName} onChange={e => set('playerName', e.target.value)} placeholder="Your name" />
-            </div>
+        <Suspense fallback={
+          <div style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
+            Loading character creator…
           </div>
-
-          {/* Species / Class */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-            <div>
-              <label htmlFor="race" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>{cfg.speciesLabel}</label>
-              <select id="race" className="input" value={form.race} onChange={e => set('race', e.target.value)}>
-                {cfg.species.map(r => <option key={r}>{r}</option>)}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="cls" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>{cfg.classLabel}</label>
-              <select id="cls" className="input" value={form.class} onChange={e => handleClassChange(e.target.value)}>
-                {cfg.classes.map(c => <option key={c}>{c}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Level / AC / HP */}
-          <div style={{ display: 'grid', gridTemplateColumns: cfg.showLevel ? '1fr 1fr 1fr' : '1fr 1fr', gap: 'var(--space-3)' }}>
-            {cfg.showLevel && (
-              <div>
-                <label htmlFor="level" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>{cfg.levelLabel}</label>
-                <input id="level" type="number" min={1} max={20} className="input" value={form.level} onChange={e => set('level', Number(e.target.value))} />
-              </div>
-            )}
-            <div>
-              <label htmlFor="ac" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>
-                Armor Class
-                {cfg.useDndStatMethods && <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', marginLeft: 4 }}>(auto-filled by Randomize)</span>}
-              </label>
-              <input id="ac" type="number" min={0} max={30} className="input" value={form.armorClass} onChange={e => set('armorClass', Number(e.target.value))} />
-            </div>
-            <div>
-              <label htmlFor="hp" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>
-                Max HP
-                {cfg.useDndStatMethods && <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', marginLeft: 4 }}>(auto-filled by Randomize)</span>}
-              </label>
-              <input id="hp" type="number" min={1} max={999} className="input" value={form.hitPointMaximum} onChange={e => { set('hitPointMaximum', Number(e.target.value)); set('currentHitPoints', Number(e.target.value)); }} />
-            </div>
-          </div>
-
-          {/* Stat block */}
-          <fieldset style={{ border: 'none', padding: 0 }}>
-            <legend style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--space-3)' }}>Attributes</legend>
-
-            {cfg.useDndStatMethods && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-                <button type="button" className={`btn ${statMethod === 'standard_array' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => handleMethodChange('standard_array')}>Standard Array</button>
-                <button type="button" className={`btn ${statMethod === 'point_buy' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => handleMethodChange('point_buy')}>Point Buy</button>
-                <button type="button" className={`btn ${statMethod === 'dice_rolls' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => handleMethodChange('dice_rolls')}>Dice Rolls</button>
-                <button
-                  type="button"
-                  className="btn btn-gold"
-                  onClick={randomizeStats}
-                  title="Rolls 4d6 drop lowest, assigns by class priority, applies ASIs, and sets AC + HP"
-                >
-                  🎲 Randomize
-                </button>
-              </div>
-            )}
-
-            {randomizeNote && (
-              <div style={{ marginBottom: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', wordBreak: 'break-all' }}>{randomizeNote}</div>
-            )}
-
-            {cfg.useDndStatMethods && statMethod === 'point_buy' && (
-              <div style={{
-                marginBottom: 'var(--space-3)', padding: 'var(--space-3)',
-                border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)',
-                background: 'var(--color-surface-offset)', fontSize: 'var(--text-sm)',
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-1)' }}>
-                  <span>Points spent</span><strong>{pointBuySpent}/27</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: pointBuyRemaining < 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
-                  <span>Remaining</span><span>{pointBuyRemaining}</span>
-                </div>
-              </div>
-            )}
-
-            {cfg.useDndStatMethods && statMethod === 'dice_rolls' && (
-              <div style={{
-                marginBottom: 'var(--space-3)', padding: 'var(--space-3)',
-                border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)',
-                background: 'var(--color-surface-offset)',
-                display: 'flex', flexDirection: 'column', gap: 'var(--space-2)',
-              }}>
-                <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-                  <button type="button" className="btn btn-primary" onClick={rollStats}>Roll 4d6 Drop Lowest</button>
-                  <button type="button" className="btn btn-ghost" onClick={assignRolledStats} disabled={rolledValues.length !== 6}>Assign to {form.class}</button>
-                </div>
-                {rolledValues.length > 0 && (
-                  <>
-                    <div style={{ fontSize: 'var(--text-sm)' }}>Rolled values: <strong>{rolledValues.join(', ')}</strong></div>
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', wordBreak: 'break-all' }}>{rollDetails}</div>
-                  </>
-                )}
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)' }}>
-              {ABILITY_KEYS.map((k, i) => {
-                const value = form.abilityScores[k];
-                const min = cfg.useDndStatMethods && statMethod === 'point_buy' ? 8 : 1;
-                const max = cfg.useDndStatMethods && statMethod === 'point_buy' ? 15 : 30;
-                const stat = cfg.stats[i];
-                return (
-                  <div key={k}>
-                    <label htmlFor={k} style={{ fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: 'var(--space-1)' }}>
-                      {stat?.label ?? k.toUpperCase()}
-                      {stat?.hint && (
-                        <span title={stat.hint} aria-label={stat.hint} style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          width: '16px', height: '16px', borderRadius: '50%', cursor: 'help',
-                          background: 'var(--color-surface-offset)', color: 'var(--color-text-muted)',
-                          fontSize: '10px', fontWeight: 700,
-                        }}>i</span>
-                      )}
-                    </label>
-                    <input id={k} type="number" min={min} max={max} className="input"
-                      value={value} onChange={e => setAbility(k, Number(e.target.value))}
-                    />
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'center', marginTop: 'var(--space-1)' }}>
-                      {formatModifier(abilityModifier(value))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {cfg.useDndStatMethods && (
-              <>
-                <div style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Expected total budget for level {form.level}: about {expectedBudget} ability points.
-                </div>
-                {statBudgetWarning && (
-                  <div style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>{statBudgetWarning}</div>
-                )}
-              </>
-            )}
-          </fieldset>
-
-          {/* System-specific extra fields (SAN/Luck for CoC, Essence/Edge for SR6) */}
-          {cfg.extraFields.length > 0 && (
-            <fieldset style={{ border: 'none', padding: 0 }}>
-              <legend style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--space-3)' }}>
-                {cfg.systemName} — Special Stats
-              </legend>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)' }}>
-                {cfg.extraFields.map(field => (
-                  <div key={field.key}>
-                    <label htmlFor={`extra-${field.key}`} style={{ fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: 'var(--space-1)' }}>
-                      {field.label}
-                      <span title={field.hint} aria-label={field.hint} style={{
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        width: '16px', height: '16px', borderRadius: '50%', cursor: 'help',
-                        background: 'var(--color-surface-offset)', color: 'var(--color-text-muted)',
-                        fontSize: '10px', fontWeight: 700,
-                      }}>i</span>
-                    </label>
-                    {field.type === 'number' ? (
-                      <input
-                        id={`extra-${field.key}`}
-                        type="number"
-                        min={field.min ?? 0}
-                        max={field.max ?? 999}
-                        className="input"
-                        value={extraValues[field.key] as number}
-                        onChange={e => setExtraValues(v => ({ ...v, [field.key]: Number(e.target.value) }))}
-                      />
-                    ) : (
-                      <input
-                        id={`extra-${field.key}`}
-                        type="text"
-                        className="input"
-                        value={extraValues[field.key] as string}
-                        onChange={e => setExtraValues(v => ({ ...v, [field.key]: e.target.value }))}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </fieldset>
-          )}
-
-          {/* Class & Background Traits (D&D 5e only) */}
-          {isDnd5e && (
-            <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-              <button
-                type="button"
-                onClick={() => setTraitsOpen(o => !o)}
-                aria-expanded={traitsOpen}
-                style={{
-                  width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: 'var(--space-3) var(--space-4)', background: 'var(--color-surface-offset)',
-                  fontSize: 'var(--text-sm)', fontWeight: 600,
-                  borderBottom: traitsOpen ? '1px solid var(--color-border)' : 'none', cursor: 'pointer',
-                }}
-              >
-                <span>Class &amp; Background Traits</span>
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', transform: traitsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 180ms ease' }}>▼</span>
-              </button>
-              {traitsOpen && (
-                <div style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-                  {classFeatures.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-primary)', marginBottom: 'var(--space-3)' }}>
-                        {form.class} — Level 1{form.level >= 2 ? '–' + Math.min(form.level, 3) : ''} Features
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                        {classFeatures.map(f => (
-                          <div key={`${f.level}-${f.name}`}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-1)' }}>
-                              <span style={{ fontSize: 'var(--text-xs)', padding: '1px 6px', borderRadius: 'var(--radius-full)', background: 'var(--color-primary-highlight)', color: 'var(--color-primary)', fontWeight: 600 }}>Lv {f.level}</span>
-                              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{f.name}</span>
-                            </div>
-                            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0, maxWidth: '100%' }}>{f.description}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {backgroundFeature && (
-                    <div>
-                      <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
-                        {form.background} — Background Feature
-                      </div>
-                      <div style={{ marginBottom: 'var(--space-1)' }}>
-                        <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{backgroundFeature.name}</span>
-                      </div>
-                      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0, maxWidth: '100%' }}>{backgroundFeature.description}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Background / Alignment row — hidden if the ruleset has no lists */}
-          {(cfg.backgrounds.length > 0 || cfg.alignments.length > 0) && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-              {cfg.backgrounds.length > 0 && (
-                <div>
-                  <label htmlFor="bg" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>{cfg.backgroundLabel}</label>
-                  <select id="bg" className="input" value={form.background} onChange={e => set('background', e.target.value)}>
-                    {cfg.backgrounds.map(b => <option key={b}>{b}</option>)}
-                  </select>
-                </div>
-              )}
-              {cfg.backgrounds.length === 0 && cfg.backgroundLabel && (
-                <div>
-                  <label htmlFor="bgText" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>{cfg.backgroundLabel}</label>
-                  <input id="bgText" className="input" value={form.background} onChange={e => set('background', e.target.value)} placeholder="Describe your background" />
-                </div>
-              )}
-              {cfg.alignments.length > 0 && (
-                <div>
-                  <label htmlFor="align" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>Alignment</label>
-                  <select id="align" className="input" value={form.alignment} onChange={e => set('alignment', e.target.value)}>
-                    {cfg.alignments.map(a => <option key={a}>{a}</option>)}
-                  </select>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div>
-            <label htmlFor="traits" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' }}>Personality Traits</label>
-            <textarea id="traits" className="input" rows={2} maxLength={2000} value={form.traits} onChange={e => set('traits', e.target.value)} style={{ resize: 'vertical' }} />
-          </div>
-
-          {error && <p role="alert" style={{ color: 'var(--color-error)', fontSize: 'var(--text-sm)' }}>{error}</p>}
-
-          <button type="submit" className="btn btn-primary" style={{ fontSize: 'var(--text-base)', padding: 'var(--space-3) var(--space-8)' }}>Create Character</button>
-        </form>
+        }>
+          {ruleset === 'dnd5e'           && <ChargenDnD5e  onCreated={handleCreated} />}
+          {ruleset === 'pathfinder2e'    && <ChargenPF2e   onCreated={handleCreated} />}
+          {ruleset === 'callofcthulhu7e' && <ChargenCoC7e  onCreated={handleCreated} />}
+          {ruleset === 'shadowrun6e'     && <ChargenSR6e   onCreated={handleCreated} />}
+          {ruleset === 'custom'          && <ChargenCustom onCreated={handleCreated} />}
+        </Suspense>
       )}
     </div>
   );
