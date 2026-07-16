@@ -53,8 +53,11 @@
 
   /* Semantic */
   --color-success: #3a6e1e;
+  --color-success-highlight: #d4e8c8;
   --color-error:   #a12c2c;
+  --color-error-highlight: #e8d0d0;
   --color-warning: #8a5200;
+  --color-warning-highlight: #f0e0c0;
 
   /* Radius */
   --radius-sm: 0.25rem; --radius-md: 0.5rem;
@@ -95,8 +98,11 @@
   --color-gold-active:     #b88c00;
   --color-gold-highlight:  #3a3010;
   --color-success:         #5a9e38;
+  --color-success-highlight: #1e3010;
   --color-error:           #d46060;
+  --color-error-highlight: #3d1a1a;
   --color-warning:         #c08030;
+  --color-warning-highlight: #3a2408;
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.25);
   --shadow-md: 0 4px 12px oklch(0 0 0 / 0.35);
   --shadow-lg: 0 12px 32px oklch(0 0 0 / 0.5);
@@ -124,8 +130,11 @@
     --color-gold-active:     #b88c00;
     --color-gold-highlight:  #3a3010;
     --color-success:         #5a9e38;
+    --color-success-highlight: #1e3010;
     --color-error:           #d46060;
+    --color-error-highlight: #3d1a1a;
     --color-warning:         #c08030;
+    --color-warning-highlight: #3a2408;
     --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.25);
     --shadow-md: 0 4px 12px oklch(0 0 0 / 0.35);
     --shadow-lg: 0 12px 32px oklch(0 0 0 / 0.5);
@@ -140,6 +149,9 @@ html {
   text-rendering: optimizeLegibility;
   scroll-behavior: smooth;
   scroll-padding-top: var(--space-16);
+  /* Hard stop: nothing may ever exceed the viewport width */
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 body {
@@ -149,6 +161,9 @@ body {
   font-size: var(--text-base);
   color: var(--color-text);
   background-color: var(--color-bg);
+  /* Mirror html constraint */
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 img, picture, video, canvas, svg { display: block; max-width: 100%; height: auto; }
@@ -222,7 +237,7 @@ a, button, [role="button"] {
   background: var(--color-surface);
   border: 1px solid oklch(from var(--color-text) l c h / 0.1);
   border-radius: var(--radius-lg);
-  padding: var(--space-6);
+  padding: var(--space-4);
   box-shadow: var(--shadow-sm);
 }
 

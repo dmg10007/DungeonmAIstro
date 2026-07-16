@@ -12,7 +12,15 @@ export default function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <NavBar />
-      <main style={{ minHeight: '100dvh', paddingTop: 'var(--space-16)' }}>
+      <main style={{
+        minHeight: '100dvh',
+        paddingTop: 'var(--space-16)',
+        /* Guarantee main never exceeds the viewport — the nuclear option */
+        width: '100%',
+        maxWidth: '100vw',
+        overflowX: 'hidden',
+        boxSizing: 'border-box',
+      }}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/setup" element={<Setup />} />
