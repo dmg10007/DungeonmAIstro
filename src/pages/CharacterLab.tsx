@@ -2,8 +2,9 @@
  * CharacterLab — thin dispatcher.
  *
  * Reads the active campaign's ruleset and mounts the correct
- * game-specific chargen component via React.lazy so unused rulesets
- * cost nothing at startup.
+ * game-specific chargen component via React.lazy.
+ * The Randomize button and weight-profile picker live inside each
+ * game-specific component so they can be tuned per system.
  */
 import { lazy, Suspense, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -13,7 +14,6 @@ import { getActiveCampaignId, loadCampaign } from '../lib/storage';
 import { getRulesetChargenConfig } from '../lib/rulesets/chargen';
 import type { ChargenProps } from '../components/chargen/types';
 
-// ── Lazy-load each ruleset's chargen ────────────────────────────────────────
 const ChargenDnD5e  = lazy(() => import('../components/chargen/ChargenDnD5e'));
 const ChargenPF2e   = lazy(() => import('../components/chargen/ChargenPF2e'));
 const ChargenCoC7e  = lazy(() => import('../components/chargen/ChargenCoC7e'));
@@ -38,7 +38,6 @@ export default function CharacterLab() {
   const handleCreated: ChargenProps['onCreated'] = (char) => setCreated(char);
   function resetForm() { setCreated(null); }
 
-  // ── Success screen ────────────────────────────────────────────────────────
   if (created) {
     return (
       <div style={{
@@ -71,10 +70,8 @@ export default function CharacterLab() {
     );
   }
 
-  // ── Outer chrome ──────────────────────────────────────────────────────────
   return (
     <div style={{ maxWidth: 'var(--content-narrow)', margin: '0 auto', padding: 'var(--space-12) var(--space-6)' }}>
-      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-6)' }}>
         <div>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-xl)', color: 'var(--color-primary)' }}>Character Lab</h1>
@@ -85,13 +82,11 @@ export default function CharacterLab() {
         </button>
       </div>
 
-      {/* Create / Import tabs */}
       <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-6)' }}>
         <button className={`btn ${tab === 'create' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('create')}>Create Character</button>
         <button className={`btn ${tab === 'import' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('import')}>Import PDF</button>
       </div>
 
-      {/* PDF import placeholder */}
       {tab === 'import' && (
         <div className="card" style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
           <div style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-3)' }}>PDF Import</div>
@@ -106,7 +101,6 @@ export default function CharacterLab() {
         </div>
       )}
 
-      {/* Game-specific chargen — lazy loaded per ruleset */}
       {tab === 'create' && (
         <Suspense fallback={
           <div style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>

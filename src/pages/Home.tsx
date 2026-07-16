@@ -1,8 +1,31 @@
-import { Link } from 'react-router-dom';
-import { listCampaigns } from '../lib/storage';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { listCampaigns, deleteCampaign, setActiveCampaignId, type CampaignSummary } from '../lib/storage';
 
 export default function Home() {
-  const campaigns = listCampaigns();
+  const navigate = useNavigate();
+  const [campaigns, setCampaigns] = useState<CampaignSummary[]>(() => listCampaigns());
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  function handleResume(id: string) {
+    setActiveCampaignId(id);
+    navigate('/play');
+  }
+
+  function handleDeleteRequest(id: string) {
+    setConfirmDeleteId(id);
+  }
+
+  function handleDeleteConfirm() {
+    if (!confirmDeleteId) return;
+    deleteCampaign(confirmDeleteId);
+    setCampaigns(listCampaigns());
+    setConfirmDeleteId(null);
+  }
+
+  function handleDeleteCancel() {
+    setConfirmDeleteId(null);
+  }
 
   return (
     <div style={{
@@ -37,10 +60,10 @@ export default function Home() {
         gap: 'var(--space-4)', width: '100%', textAlign: 'left',
       }}>
         {[
-          { icon: '🗺', title: 'Full Campaigns', desc: 'One-shots or multi-session epics — generated to your prompt.' },
-          { icon: '🎲', title: 'Dice Engine', desc: 'Every die in 5e: d4 through d100 with advantage/disadvantage.' },
-          { icon: '📜', title: 'Character Lab', desc: 'Build from scratch or import a filled PDF character sheet.' },
-          { icon: '🧠', title: 'Persistent Memory', desc: 'The DM remembers every choice, roll, and NPC across sessions.' },
+          { icon: '\uD83D\uDDFA', title: 'Full Campaigns', desc: 'One-shots or multi-session epics \u2014 generated to your prompt.' },
+          { icon: '\uD83C\uDFB2', title: 'Dice Engine', desc: 'Every die in 5e: d4 through d100 with advantage/disadvantage.' },
+          { icon: '\uD83D\uDCDC', title: 'Character Lab', desc: 'Build from scratch or import a filled PDF character sheet.' },
+          { icon: '\uD83E\uDDE0', title: 'Persistent Memory', desc: 'The DM remembers every choice, roll, and NPC across sessions.' },
         ].map(f => (
           <div key={f.title} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
             <span style={{ fontSize: '1.5rem' }} aria-hidden="true">{f.icon}</span>
@@ -56,14 +79,68 @@ export default function Home() {
           <h2 style={{ fontSize: 'var(--text-xl)', fontFamily: 'var(--font-display)', marginBottom: 'var(--space-4)' }}>Continue a Campaign</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
             {campaigns.map(c => (
-              <div key={c.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{c.title}</div>
+              <div
+                key={c.id}
+                className="card"
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-3)' }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                     {c.mode === 'one_shot' ? 'One-shot' : 'Campaign'} — {new Date(c.updatedAt).toLocaleDateString()}
                   </div>
                 </div>
-                <Link to="/play" className="btn btn-ghost" style={{ fontSize: 'var(--text-sm)' }}>Resume</Link>
+
+                {confirmDeleteId === c.id ? (
+                  // Inline confirmation
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexShrink: 0 }}>
+                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-error)', whiteSpace: 'nowrap' }}>Delete forever?</span>
+                    <button
+                      className="btn"
+                      style={{
+                        fontSize: 'var(--text-xs)', padding: 'var(--space-1) var(--space-3)',
+                        background: 'var(--color-error)', color: '#fff', borderRadius: 'var(--radius-md)',
+                      }}
+                      onClick={handleDeleteConfirm}
+                    >
+                      Yes, delete
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ fontSize: 'var(--text-xs)', padding: 'var(--space-1) var(--space-3)' }}
+                      onClick={handleDeleteCancel}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ fontSize: 'var(--text-sm)' }}
+                      onClick={() => handleResume(c.id)}
+                    >
+                      Resume
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      style={{
+                        fontSize: 'var(--text-sm)',
+                        color: 'var(--color-error)',
+                        padding: 'var(--space-1) var(--space-2)',
+                      }}
+                      aria-label={`Delete campaign ${c.title}`}
+                      onClick={() => handleDeleteRequest(c.id)}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                        <path d="M10 11v6M14 11v6"/>
+                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                      </svg>
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
