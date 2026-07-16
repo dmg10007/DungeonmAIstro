@@ -20,6 +20,9 @@ const ChargenCoC7e  = lazy(() => import('../components/chargen/ChargenCoC7e'));
 const ChargenSR6e   = lazy(() => import('../components/chargen/ChargenSR6e'));
 const ChargenCustom = lazy(() => import('../components/chargen/ChargenCustom'));
 
+/** Rulesets that use the d20 (score-10)/2 ability modifier convention. */
+const MODIFIER_RULESETS: Ruleset[] = ['dnd5e', 'pathfinder2e'];
+
 function getActiveCampaignRuleset(): Ruleset {
   const id = getActiveCampaignId();
   if (!id) return 'dnd5e';
@@ -31,6 +34,7 @@ export default function CharacterLab() {
   const navigate  = useNavigate();
   const ruleset   = useMemo(getActiveCampaignRuleset, []);
   const cfg       = useMemo(() => getRulesetChargenConfig(ruleset), [ruleset]);
+  const showModifier = MODIFIER_RULESETS.includes(ruleset);
 
   const [tab, setTab]         = useState<'create' | 'import'>('create');
   const [created, setCreated] = useState<Character | null>(null);
@@ -57,7 +61,12 @@ export default function CharacterLab() {
             {(Object.keys(created.abilityScores) as (keyof typeof created.abilityScores)[]).map((k, i) => (
               <div key={k}>
                 <strong>{cfg.stats[i]?.label ?? k.toUpperCase()}:</strong>{' '}
-                {created.abilityScores[k]} ({formatModifier(abilityModifier(created.abilityScores[k]))})
+                {created.abilityScores[k]}
+                {showModifier && (
+                  <span style={{ color: 'var(--color-text-muted)' }}>
+                    {' '}({formatModifier(abilityModifier(created.abilityScores[k]))})
+                  </span>
+                )}
               </div>
             ))}
           </div>
