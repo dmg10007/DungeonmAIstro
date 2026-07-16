@@ -14,8 +14,9 @@ import {
   getPointBuySpent,
   getStandardArrayScores,
   getStatBudgetWarning,
-  randomizeStatBlock,
+  weightedRandomize,
   rollStatBlock,
+  WEIGHT_PROFILES,
   type AbilityKey,
 } from '../../lib/chargen';
 import { getClassFeaturesUpToLevel, getBackgroundFeature } from '../../lib/classTraits';
@@ -28,12 +29,13 @@ type StatMethod = typeof STAT_METHODS[number];
 
 export default function ChargenDnD5e({ onCreated }: ChargenProps) {
   const navigate = useNavigate();
-  const [statMethod, setStatMethod] = useState<StatMethod>('standard_array');
-  const [rolledValues, setRolledValues] = useState<number[]>([]);
-  const [rollDetails, setRollDetails] = useState('');
+  const [statMethod, setStatMethod]       = useState<StatMethod>('standard_array');
+  const [rolledValues, setRolledValues]   = useState<number[]>([]);
+  const [rollDetails, setRollDetails]     = useState('');
   const [randomizeNote, setRandomizeNote] = useState('');
-  const [traitsOpen, setTraitsOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [traitsOpen, setTraitsOpen]       = useState(false);
+  const [error, setError]                 = useState<string | null>(null);
+  const [profileId, setProfileId]         = useState('balanced');
 
   const [form, setForm] = useState(() => ({
     characterName: '',
@@ -71,7 +73,8 @@ export default function ChargenDnD5e({ onCreated }: ChargenProps) {
   }
 
   function randomizeStats() {
-    const result = randomizeStatBlock(form.class, form.level);
+    const profile = WEIGHT_PROFILES.find(p => p.id === profileId) ?? WEIGHT_PROFILES[0];
+    const result = weightedRandomize(form.class, form.level, profile);
     setForm(f => ({
       ...f,
       abilityScores: result.scores,
@@ -88,7 +91,7 @@ export default function ChargenDnD5e({ onCreated }: ChargenProps) {
   function rollStats() {
     const rolled = rollStatBlock();
     setRolledValues(rolled.scores);
-    setRollDetails(rolled.rolls.map(r => `[${r.dice.join(', ')}] → ${r.total}`).join(' | '));
+    setRollDetails(rolled.rolls.map(r => `[${r.dice.join(', ')}] \u2192 ${r.total}`).join(' | '));
     setStatMethod('dice_rolls');
     setRandomizeNote('');
   }
@@ -124,12 +127,13 @@ export default function ChargenDnD5e({ onCreated }: ChargenProps) {
     }
   }
 
-  const pointBuySpent = useMemo(() => getPointBuySpent(form.abilityScores), [form.abilityScores]);
+  const pointBuySpent     = useMemo(() => getPointBuySpent(form.abilityScores), [form.abilityScores]);
   const pointBuyRemaining = 27 - pointBuySpent;
   const statBudgetWarning = useMemo(() => getStatBudgetWarning(form.abilityScores, form.level), [form.abilityScores, form.level]);
-  const expectedBudget = useMemo(() => getExpectedStatBudget(form.level), [form.level]);
-  const classFeatures = useMemo(() => getClassFeaturesUpToLevel(form.class, Math.min(form.level, 3)), [form.class, form.level]);
+  const expectedBudget    = useMemo(() => getExpectedStatBudget(form.level), [form.level]);
+  const classFeatures     = useMemo(() => getClassFeaturesUpToLevel(form.class, Math.min(form.level, 3)), [form.class, form.level]);
   const backgroundFeature = useMemo(() => getBackgroundFeature(form.background), [form.background]);
+  const activeProfile     = WEIGHT_PROFILES.find(p => p.id === profileId) ?? WEIGHT_PROFILES[0];
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -179,7 +183,32 @@ export default function ChargenDnD5e({ onCreated }: ChargenProps) {
               {m === 'standard_array' ? 'Standard Array' : m === 'point_buy' ? 'Point Buy' : 'Dice Rolls'}
             </button>
           ))}
-          <button type="button" className="btn btn-gold" onClick={randomizeStats} title="4d6 drop lowest, assigned by class priority">🎲 Randomize</button>
+        </div>
+
+        {/* Weighted Randomize row */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap',
+          padding: 'var(--space-3)', borderRadius: 'var(--radius-md)',
+          background: 'var(--color-surface-offset)', border: '1px solid var(--color-border)',
+          marginBottom: 'var(--space-3)',
+        }}>
+          <label htmlFor="d5-profile" style={{ fontSize: 'var(--text-xs)', fontWeight: 600, whiteSpace: 'nowrap' }}>Weight Profile</label>
+          <select
+            id="d5-profile"
+            className="input"
+            value={profileId}
+            onChange={e => setProfileId(e.target.value)}
+            style={{ fontSize: 'var(--text-xs)', padding: 'var(--space-1) var(--space-2)', flex: '0 0 auto', minWidth: 130 }}
+          >
+            {WEIGHT_PROFILES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flex: 1, minWidth: 0 }}>
+            {activeProfile.description}
+          </span>
+          <button type="button" className="btn btn-gold" onClick={randomizeStats} style={{ whiteSpace: 'nowrap' }}
+            title={`Roll 4d6 drop lowest with ${activeProfile.label} weighting`}>
+            \uD83C\uDFB2 Randomize
+          </button>
         </div>
 
         {randomizeNote && <div style={{ marginBottom: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{randomizeNote}</div>}
@@ -234,47 +263,11 @@ export default function ChargenDnD5e({ onCreated }: ChargenProps) {
         <button type="button" onClick={() => setTraitsOpen(o => !o)} aria-expanded={traitsOpen}
           style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-3) var(--space-4)', background: 'var(--color-surface-offset)', fontSize: 'var(--text-sm)', fontWeight: 600, borderBottom: traitsOpen ? '1px solid var(--color-border)' : 'none', cursor: 'pointer' }}>
           <span>Class &amp; Background Traits</span>
-          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', transform: traitsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 180ms ease' }}>▼</span>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', transform: traitsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 180ms ease' }}>\u25BC</span>
         </button>
         {traitsOpen && (
           <div style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
             {classFeatures.length > 0 && (
               <div>
-                <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-primary)', marginBottom: 'var(--space-3)' }}>{form.class} — Level 1{form.level >= 2 ? '–' + Math.min(form.level, 3) : ''} Features</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                  {classFeatures.map(f => (
-                    <div key={`${f.level}-${f.name}`}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-1)' }}>
-                        <span style={{ fontSize: 'var(--text-xs)', padding: '1px 6px', borderRadius: 'var(--radius-full)', background: 'var(--color-primary-highlight)', color: 'var(--color-primary)', fontWeight: 600 }}>Lv {f.level}</span>
-                        <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{f.name}</span>
-                      </div>
-                      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0, maxWidth: '100%' }}>{f.description}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {backgroundFeature && (
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>{form.background} — Background Feature</div>
-                <div style={{ marginBottom: 'var(--space-1)' }}><span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{backgroundFeature.name}</span></div>
-                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0, maxWidth: '100%' }}>{backgroundFeature.description}</p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Background / Alignment */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-        <div><label style={s.label} htmlFor="d5-bg">Background</label><select id="d5-bg" className="input" value={form.background} onChange={e => set('background', e.target.value)}>{cfg.backgrounds.map(b => <option key={b}>{b}</option>)}</select></div>
-        <div><label style={s.label} htmlFor="d5-align">Alignment</label><select id="d5-align" className="input" value={form.alignment} onChange={e => set('alignment', e.target.value)}>{cfg.alignments.map(a => <option key={a}>{a}</option>)}</select></div>
-      </div>
-
-      <div><label style={s.label} htmlFor="d5-traits">Personality Traits</label><textarea id="d5-traits" className="input" rows={2} maxLength={2000} value={form.traits} onChange={e => set('traits', e.target.value)} style={{ resize: 'vertical' }} /></div>
-
-      {error && <p role="alert" style={{ color: 'var(--color-error)', fontSize: 'var(--text-sm)' }}>{error}</p>}
-      <button type="submit" className="btn btn-primary" style={{ fontSize: 'var(--text-base)', padding: 'var(--space-3) var(--space-8)' }}>Create Character</button>
-    </form>
-  );
-}
+                <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-primary)', marginBottom: 'var(--space-3)' }}>{form.class} \u2014 Level 1{form.level >= 2 ? '\u2013' + Math.min(form.level, 3) : ''} Features</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 
