@@ -53,8 +53,6 @@ function buildCritMessage(result: DiceRollResult, critType: 'nat20' | 'nat1'): s
 
 function buildRollNotifyMessage(result: DiceRollResult): string {
   const label = result.reason ? ` for ${result.reason}` : '';
-  // The total is the FINAL result including any modifier already baked in by the dice roller.
-  // We tell the DM clearly so it does not add a second modifier.
   return `[DICE ROLL] I rolled ${result.notation}${label}: final result is ${result.total} (already includes all modifiers). Please incorporate this result into the narrative as appropriate — do NOT add any additional modifiers.`;
 }
 
@@ -200,7 +198,6 @@ function PassphraseModal({ onSubmit, onCancel, error }: {
 function CharacterSheet({ character }: { character: Character }) {
   const scores = character.abilityScores;
 
-  // Guard: if abilityScores is missing or incomplete, show a graceful fallback
   if (!scores || typeof scores.dex === 'undefined') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', fontSize: 'var(--text-xs)' }}>
@@ -211,7 +208,7 @@ function CharacterSheet({ character }: { character: Character }) {
           {character.race} {character.class} · Level {character.level}
         </div>
         <div style={{ color: 'var(--color-warning)', background: 'var(--color-warning-highlight)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)' }}>
-          ⚠ Ability scores are missing from this character's saved data. Re-create or re-save the character to fix this.
+          ⚠ Ability scores are missing from this character’s saved data. Re-create or re-save the character to fix this.
         </div>
       </div>
     );
@@ -284,7 +281,7 @@ function CharacterSheet({ character }: { character: Character }) {
       {character.equipment && (
         <div style={{ borderTop: '1px solid var(--color-divider)', paddingTop: 'var(--space-2)' }}>
           <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 4 }}>Equipment</div>
-          <p style={{ color: 'var(--color-text-muted)', lineHeight: 1.5, margin: 0, maxWidth: '100%' }}>{character.equipment}</p>
+          <p style={{ color: 'var(--color-text-muted)', lineHeight: 1.5, margin: 0, maxWidth: '100%', wordBreak: 'break-word' }}>{character.equipment}</p>
         </div>
       )}
 
@@ -292,7 +289,7 @@ function CharacterSheet({ character }: { character: Character }) {
       {character.traits && (
         <div style={{ borderTop: '1px solid var(--color-divider)', paddingTop: 'var(--space-2)' }}>
           <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 4 }}>Traits</div>
-          <p style={{ color: 'var(--color-text-muted)', lineHeight: 1.5, margin: 0, maxWidth: '100%' }}>{character.traits}</p>
+          <p style={{ color: 'var(--color-text-muted)', lineHeight: 1.5, margin: 0, maxWidth: '100%', wordBreak: 'break-word' }}>{character.traits}</p>
         </div>
       )}
     </div>
@@ -307,7 +304,6 @@ export default function Play() {
   const campaignId = getActiveCampaignId();
   const campaign = campaignId ? loadCampaign(campaignId) : null;
 
-  // Load the full character from its own storage key (not the campaign ref summary)
   const activeCharacter: Character | null = loadCharacter();
 
   const [messages, setMessages] = useState<Message[]>(
@@ -354,8 +350,6 @@ export default function Play() {
     );
   }
 
-  // Send a message to the DM without showing it in the player's chat.
-  // persist=false so it is also not saved to campaign history as a user message.
   async function doSendSilent(text: string, passphrase: string) {
     await doSend(text, passphrase, /* persist= */ false, /* showInChat= */ false);
   }
@@ -451,7 +445,6 @@ export default function Play() {
     let eventLabel = '';
     if (crit === 'nat20') eventLabel = ' ✨ CRITICAL SUCCESS!';
     else if (crit === 'nat1') eventLabel = ' 💀 CRITICAL FAILURE!';
-    // Always show the dice roll event in the chat
     setMessages(m => [...m, {
       role: 'event',
       content: `🎲 **${result.actorType === 'player' ? 'You rolled' : 'Rolled'}** ${result.notation}: **${result.total}** [${result.rolls.join(', ')}]${result.reason ? ` — *${result.reason}*` : ''}${eventLabel}`,
@@ -459,11 +452,9 @@ export default function Play() {
     }]);
     if (crit) {
       const critMsg = buildCritMessage(result, crit);
-      // Crit messages ARE shown in chat (they come from the user describing the crit)
       if (passphraseRef.current) { doSend(critMsg, passphraseRef.current, false); }
       else { setPendingInput(critMsg); setPassphraseError(null); setShowPassphrase(true); }
     } else if (notifyDMOnRoll) {
-      // Non-crit DM notify: send silently — do NOT show the raw [DICE ROLL] prompt in the user's chat
       const notifyMsg = buildRollNotifyMessage(result);
       if (passphraseRef.current) { doSendSilent(notifyMsg, passphraseRef.current); }
       else { setPendingInput(notifyMsg); setPassphraseError(null); setShowPassphrase(true); }
@@ -508,7 +499,7 @@ export default function Play() {
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               gap: 'var(--space-3)', flexShrink: 0,
             }}>
-              <span>⚠ No LLM key configured — the DM can't respond yet.</span>
+              <span>⚠ No LLM key configured — the DM can’t respond yet.</span>
               <Link to="/settings" style={{ color: 'var(--color-warning)', fontWeight: 600, textDecoration: 'underline' }}>Add key in Settings</Link>
             </div>
           )}
@@ -630,12 +621,12 @@ export default function Play() {
         <div className="play-sidebar">
 
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
-            <button className={`btn ${panel === 'dice' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setPanel(p => p === 'dice' ? null : 'dice')}>🎲 Dice</button>
-            <button className={`btn ${panel === 'combat' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setPanel(p => p === 'combat' ? null : 'combat')}>⚔ Combat</button>
+            <button className={`btn ${panel === 'dice' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1, minWidth: 0 }} onClick={() => setPanel(p => p === 'dice' ? null : 'dice')}>🎲 Dice</button>
+            <button className={`btn ${panel === 'combat' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1, minWidth: 0 }} onClick={() => setPanel(p => p === 'combat' ? null : 'combat')}>⚔ Combat</button>
             {activeCharacter && (
               <button
                 className={`btn ${panel === 'sheet' ? 'btn-primary' : 'btn-ghost'}`}
-                style={{ flex: 1 }}
+                style={{ flex: 1, minWidth: 0 }}
                 onClick={() => setPanel(p => p === 'sheet' ? null : 'sheet')}
                 title="Character Sheet"
               >📋 Sheet</button>
@@ -643,24 +634,24 @@ export default function Play() {
           </div>
 
           {panel === 'dice' && (
-            <div className="card" style={{ overflowY: 'auto' }}>
+            <div className="card" style={{ overflowY: 'auto', minWidth: 0 }}>
               <DiceRoller onRoll={handleDiceRoll} actorType="player" />
             </div>
           )}
           {panel === 'combat' && (
-            <div className="card" style={{ overflowY: 'auto' }}>
+            <div className="card" style={{ overflowY: 'auto', minWidth: 0 }}>
               <CombatTracker />
             </div>
           )}
           {panel === 'sheet' && activeCharacter && (
-            <div className="card" style={{ overflowY: 'auto' }}>
+            <div className="card" style={{ overflowY: 'auto', minWidth: 0 }}>
               <CharacterSheet character={activeCharacter} />
             </div>
           )}
 
           {/* Notify DM toggle */}
-          <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', flexShrink: 0 }}>
-            <div>
+          <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', flexShrink: 0, minWidth: 0 }}>
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
               <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Notify DM on roll</div>
               <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                 {notifyDMOnRoll ? 'Every roll sends a note to the DM' : 'Only crits auto-notify the DM'}
@@ -686,18 +677,19 @@ export default function Play() {
 
           {/* Party */}
           {campaign.characters.length > 0 && (
-            <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', flexShrink: 0 }}>
+            <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', flexShrink: 0, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Party</div>
               {campaign.characters.map(c => (
-                <div key={c.id} style={{ fontSize: 'var(--text-xs)', display: 'flex', justifyContent: 'space-between', color: 'var(--color-text-muted)' }}>
-                  <span>{c.characterName}</span><span>{c.class} {c.level}</span>
+                <div key={c.id} style={{ fontSize: 'var(--text-xs)', display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', color: 'var(--color-text-muted)', minWidth: 0 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.characterName}</span>
+                  <span style={{ flexShrink: 0 }}>{c.class} {c.level}</span>
                 </div>
               ))}
             </div>
           )}
 
           {/* Campaign info */}
-          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0, minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>Campaign</div>
             <div>Mode: {campaign.options.mode === 'one_shot' ? 'One-shot' : 'Campaign'}</div>
             <div>Tone: {campaign.options.tone.join(', ')}</div>
@@ -714,18 +706,18 @@ export default function Play() {
           </div>
 
           {/* Slash reference */}
-          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0, minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>/ Commands</div>
             {[
               ['/roll d20', 'Roll a d20'],
               ['/roll 2d6+3', 'Roll 2d6 + 3'],
               ['/roll d20-1 stealth', 'Named roll'],
-              ['/adv perception', 'Roll with advantage'],
-              ['/dis athletics', 'Roll with disadvantage'],
+              ['/adv perception', 'Advantage'],
+              ['/dis athletics', 'Disadvantage'],
             ].map(([cmd, desc]) => (
-              <div key={cmd} style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
-                <code style={{ background: 'var(--color-surface-offset)', borderRadius: 'var(--radius-sm)', padding: '1px var(--space-2)', whiteSpace: 'nowrap' }}>{cmd}</code>
-                <span style={{ color: 'var(--color-text-faint)', textAlign: 'right' }}>{desc}</span>
+              <div key={cmd} style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', minWidth: 0, overflow: 'hidden' }}>
+                <code style={{ background: 'var(--color-surface-offset)', borderRadius: 'var(--radius-sm)', padding: '1px var(--space-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 1, minWidth: 0 }}>{cmd}</code>
+                <span style={{ color: 'var(--color-text-faint)', textAlign: 'right', flexShrink: 0 }}>{desc}</span>
               </div>
             ))}
             <div style={{ marginTop: 'var(--space-1)', padding: 'var(--space-2)', background: 'var(--color-gold-highlight)', borderRadius: 'var(--radius-sm)', color: 'var(--color-gold)', fontWeight: 600 }}>
@@ -736,10 +728,9 @@ export default function Play() {
       </div>
 
       <style>{`
-        /* ── Play screen layout ─────────────────────────────────────────────── */
+        /* ── Play screen layout ─────────────────────────────────────────────────────────── */
         .play-grid {
           display: grid;
-          /* chat takes remaining space; sidebar has a fluid min of 260px, max 300px */
           grid-template-columns: 1fr clamp(260px, 25vw, 300px);
           gap: var(--space-6);
           height: calc(100dvh - 64px);
@@ -763,10 +754,12 @@ export default function Play() {
           flex-direction: column;
           gap: var(--space-4);
           overflow-y: auto;
+          overflow-x: hidden;   /* prevent any child from blowing out the sidebar width */
           min-height: 0;
+          min-width: 0;         /* allow sidebar to shrink inside the grid track */
         }
 
-        /* ── Tablet (768–1024px): sidebar moves below chat ─────────────────── */
+        /* ── Tablet (768–1024px): sidebar moves below chat ────────────────────── */
         @media (max-width: 1024px) {
           .play-grid {
             grid-template-columns: 1fr;
@@ -775,22 +768,19 @@ export default function Play() {
             padding: var(--space-4) var(--space-4);
             gap: var(--space-4);
           }
-          /* Chat column gets a fixed viewport-relative height so it stays
-             scrollable while the sidebar flows naturally below it */
           .play-chat-col {
             height: clamp(420px, 60dvh, 720px);
             overflow: hidden;
           }
           .play-sidebar {
             overflow: visible;
+            overflow-x: hidden;
             min-height: auto;
-            /* On tablet/mobile render sidebar as a 2-col grid of cards */
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
             gap: var(--space-3);
             align-items: start;
           }
-          /* Tool button row and expandable panels span the full sidebar width */
           .play-sidebar > div:first-child {
             grid-column: 1 / -1;
           }
@@ -801,7 +791,7 @@ export default function Play() {
           }
         }
 
-        /* ── Mobile (<600px): single column, tighter padding ───────────────── */
+        /* ── Mobile (<600px): single column, tighter padding ───────────────────── */
         @media (max-width: 600px) {
           .play-grid {
             padding: var(--space-3) var(--space-3);
