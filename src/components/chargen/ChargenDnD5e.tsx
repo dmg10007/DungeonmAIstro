@@ -269,5 +269,84 @@ export default function ChargenDnD5e({ onCreated }: ChargenProps) {
           <div style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
             {classFeatures.length > 0 && (
               <div>
-                <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-primary)', marginBottom: 'var(--space-3)' }}>{form.class} \u2014 Level 1{form.level >= 2 ? '\u2013' + Math.min(form.level, 3) : ''} Features</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 
+                <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-primary)', marginBottom: 'var(--space-3)' }}>
+                  {form.class} \u2014 Level 1{form.level >= 2 ? '\u2013' + Math.min(form.level, 3) : ''} Features
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                  {classFeatures.map((feat, idx) => (
+                    <div key={idx} style={{ padding: 'var(--space-3)', background: 'var(--color-surface-offset)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-xs)' }}>
+                      <div style={{ fontWeight: 700, color: 'var(--color-text)', marginBottom: 'var(--space-1)' }}>{feat.name}</div>
+                      <div style={{ color: 'var(--color-text-muted)', lineHeight: 1.6 }}>{feat.description}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {backgroundFeature && (
+              <div>
+                <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-primary)', marginBottom: 'var(--space-3)' }}>
+                  {form.background} Background Feature
+                </div>
+                <div style={{ padding: 'var(--space-3)', background: 'var(--color-surface-offset)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-xs)' }}>
+                  <div style={{ fontWeight: 700, color: 'var(--color-text)', marginBottom: 'var(--space-1)' }}>{backgroundFeature.name}</div>
+                  <div style={{ color: 'var(--color-text-muted)', lineHeight: 1.6 }}>{backgroundFeature.description}</div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Background / Alignment */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+        <div>
+          <label style={s.label} htmlFor="d5-bg">Background</label>
+          <select id="d5-bg" className="input" value={form.background} onChange={e => set('background', e.target.value)}>
+            {cfg.backgrounds.map(b => <option key={b}>{b}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={s.label} htmlFor="d5-align">Alignment</label>
+          <select id="d5-align" className="input" value={form.alignment} onChange={e => set('alignment', e.target.value)}>
+            {cfg.alignments.map(a => <option key={a}>{a}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Speed */}
+      <div>
+        <label style={s.label} htmlFor="d5-speed">Speed (ft)</label>
+        <input id="d5-speed" type="number" min={0} max={120} className="input" style={{ maxWidth: 120 }} value={form.speed} onChange={e => set('speed', Number(e.target.value))} />
+      </div>
+
+      {/* Personality */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        <div><label style={s.label} htmlFor="d5-traits">Personality Traits</label><textarea id="d5-traits" className="input" rows={2} value={form.traits} onChange={e => set('traits', e.target.value)} placeholder="Describe your character's personality..." /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+          <div><label style={s.label} htmlFor="d5-ideals">Ideals</label><textarea id="d5-ideals" className="input" rows={2} value={form.ideals} onChange={e => set('ideals', e.target.value)} placeholder="What drives you?" /></div>
+          <div><label style={s.label} htmlFor="d5-bonds">Bonds</label><textarea id="d5-bonds" className="input" rows={2} value={form.bonds} onChange={e => set('bonds', e.target.value)} placeholder="Who or what matters most?" /></div>
+        </div>
+        <div><label style={s.label} htmlFor="d5-flaws">Flaws</label><textarea id="d5-flaws" className="input" rows={2} value={form.flaws} onChange={e => set('flaws', e.target.value)} placeholder="Your character's weaknesses..." /></div>
+      </div>
+
+      {/* Equipment */}
+      <div>
+        <label style={s.label} htmlFor="d5-equip">Equipment</label>
+        <textarea id="d5-equip" className="input" rows={3} value={form.equipment} onChange={e => set('equipment', e.target.value)} placeholder="List your starting gear..." />
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div role="alert" style={{ padding: 'var(--space-3) var(--space-4)', background: 'var(--color-error-highlight)', border: '1px solid var(--color-error)', borderRadius: 'var(--radius-md)', color: 'var(--color-error)', fontSize: 'var(--text-sm)' }}>
+          {error}
+        </div>
+      )}
+
+      {/* Submit */}
+      <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', paddingTop: 'var(--space-2)' }}>
+        <button type="button" className="btn btn-ghost" onClick={() => navigate(-1)}>Cancel</button>
+        <button type="submit" className="btn btn-primary">Create Character</button>
+      </div>
+    </form>
+  );
+}
