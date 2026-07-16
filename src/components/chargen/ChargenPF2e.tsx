@@ -9,13 +9,10 @@ import type { ChargenProps } from './types';
 
 const cfg = getRulesetChargenConfig('pathfinder2e');
 
-// PF2e uses a boost system: each boost +2 (or +1 if already ≥18)
 const BASE = 10;
 const STAT_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
 type StatKey = typeof STAT_KEYS[number];
 
-// Each ancestry gives 2 fixed boosts + 1 free; background gives 2 fixed + 1 free; class gives 1 fixed
-// For simplicity we give players 4 free boosts at creation + background + class key boost selection
 const ANCESTRY_BOOSTS: Record<string, [StatKey, StatKey]> = {
   Human: ['str', 'dex'], Elf: ['dex', 'int'], Dwarf: ['con', 'wis'], Gnome: ['con', 'cha'],
   Goblin: ['dex', 'cha'], Halfling: ['dex', 'wis'], Leshy: ['con', 'wis'], Orc: ['str', 'con'],
@@ -40,11 +37,36 @@ function calcScore(ancestry: string, cls: string, freeBoosts: Set<StatKey>): Rec
   return scores;
 }
 
+// ── Weight profiles for PF2e free-boost randomization ────────────────────────
+interface PF2eProfile { id: string; label: string; desc: string; priority: StatKey[] }
+const PF2E_PROFILES: PF2eProfile[] = [
+  { id: 'any',      label: 'Any',      desc: 'Fully random — equal chance for each stat.',       priority: [] },
+  { id: 'social',   label: 'Social',   desc: 'Favours CHA, WIS, INT.',                            priority: ['cha', 'wis', 'int'] },
+  { id: 'physical', label: 'Physical', desc: 'Favours STR, CON, DEX.',                            priority: ['str', 'con', 'dex'] },
+  { id: 'mental',   label: 'Mental',   desc: 'Favours INT, WIS, CON.',                            priority: ['int', 'wis', 'con'] },
+];
+
+function randomBoosts(n: number, exclude: Set<StatKey>, profile: PF2eProfile): Set<StatKey> {
+  const available = STAT_KEYS.filter(k => !exclude.has(k));
+  const result = new Set<StatKey>();
+  if (profile.priority.length === 0) {
+    // pure random
+    const shuffled = [...available].sort(() => Math.random() - 0.5);
+    shuffled.slice(0, n).forEach(k => result.add(k));
+  } else {
+    // weighted: priority keys first, then fill randomly
+    const prio = profile.priority.filter(k => available.includes(k));
+    const rest  = available.filter(k => !profile.priority.includes(k)).sort(() => Math.random() - 0.5);
+    [...prio, ...rest].slice(0, n).forEach(k => result.add(k));
+  }
+  return result;
+}
+
 export default function ChargenPF2e({ onCreated }: ChargenProps) {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
-  // 4 free boosts at level 1
   const [freeBoosts, setFreeBoosts] = useState<Set<StatKey>>(new Set());
+  const [profileId, setProfileId] = useState('any');
 
   const [form, setForm] = useState({
     characterName: '',
@@ -77,8 +99,15 @@ export default function ChargenPF2e({ onCreated }: ChargenProps) {
     });
   }
 
-  const scores = calcScore(form.race, form.class, freeBoosts);
+  function handleRandomizeBoosts() {
+    const profile = PF2E_PROFILES.find(p => p.id === profileId) ?? PF2E_PROFILES[0];
+    const locked = new Set<StatKey>(); // nothing locked for free boosts
+    setFreeBoosts(randomBoosts(4, locked, profile));
+  }
+
+  const scores    = calcScore(form.race, form.class, freeBoosts);
   const boostsLeft = 4 - freeBoosts.size;
+  const activeProfile = PF2E_PROFILES.find(p => p.id === profileId) ?? PF2E_PROFILES[0];
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -100,7 +129,7 @@ export default function ChargenPF2e({ onCreated }: ChargenProps) {
     if (!parsed.success) { setError(parsed.error.errors[0].message); return; }
     saveCharacter(parsed.data);
     addCharacterToActiveCampaign({ id: parsed.data.id, characterName: parsed.data.characterName, class: parsed.data.class, level: parsed.data.level });
-    onCreated(parsed.data);
+    onCreated(parsed.data as Character);
   }
 
   const s = { label: { fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 'var(--space-1)' } as React.CSSProperties };
@@ -132,9 +161,40 @@ export default function ChargenPF2e({ onCreated }: ChargenProps) {
       {/* Ability Boosts panel */}
       <fieldset style={{ border: 'none', padding: 0 }}>
         <legend style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Ability Scores — Boost System</legend>
-        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)', margin: '0 0 var(--space-3)' }}>
-          Each boost adds +2 (or +1 if already ≥18). Your ancestry, class, and 4 free boosts are applied below.
+        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '0 0 var(--space-3)' }}>
+          Each boost adds +2 (or +1 if already ≥18). Ancestry, class, and 4 free boosts applied below.
         </p>
+
+        {/* Weighted randomize bar */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap',
+          padding: 'var(--space-3)', borderRadius: 'var(--radius-md)',
+          background: 'var(--color-surface-offset)', border: '1px solid var(--color-border)',
+          marginBottom: 'var(--space-3)',
+        }}>
+          <label htmlFor="pf-profile" style={{ fontSize: 'var(--text-xs)', fontWeight: 600, whiteSpace: 'nowrap' }}>Boost Profile</label>
+          <select
+            id="pf-profile"
+            className="input"
+            value={profileId}
+            onChange={e => setProfileId(e.target.value)}
+            style={{ fontSize: 'var(--text-xs)', padding: 'var(--space-1) var(--space-2)', flex: '0 0 auto', minWidth: 110 }}
+          >
+            {PF2E_PROFILES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flex: 1, minWidth: 0 }}>
+            {activeProfile.desc}
+          </span>
+          <button
+            type="button"
+            className="btn btn-gold"
+            onClick={handleRandomizeBoosts}
+            style={{ whiteSpace: 'nowrap' }}
+            title="Randomly assign all 4 free boosts using the selected profile"
+          >
+            🎲 Randomize Boosts
+          </button>
+        </div>
 
         {/* Boost source legend */}
         <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', marginBottom: 'var(--space-3)', fontSize: 'var(--text-xs)' }}>
@@ -146,10 +206,10 @@ export default function ChargenPF2e({ onCreated }: ChargenProps) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-3)' }}>
           {STAT_KEYS.map((k, i) => {
             const label = cfg.stats[i]?.label ?? k.toUpperCase();
-            const hint = cfg.stats[i]?.hint ?? '';
+            const hint  = cfg.stats[i]?.hint ?? '';
             const isAncestry = ancestryBoosts.includes(k as StatKey);
             const isClass = classBoost === k;
-            const isFree = freeBoosts.has(k);
+            const isFree  = freeBoosts.has(k);
             return (
               <div key={k} style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)', background: 'var(--color-surface)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-2)' }}>
@@ -159,10 +219,9 @@ export default function ChargenPF2e({ onCreated }: ChargenProps) {
                   </div>
                   <div style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-primary)', lineHeight: 1 }}>{scores[k]}</div>
                 </div>
-                {/* Boost dots */}
                 <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
                   {isAncestry && <span title="Ancestry boost" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-primary)', display: 'inline-block' }} />}
-                  {isClass && <span title="Class key ability boost" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-gold)', display: 'inline-block' }} />}
+                  {isClass    && <span title="Class key ability boost" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-gold)', display: 'inline-block' }} />}
                   <button
                     type="button"
                     onClick={() => toggleBoost(k)}
