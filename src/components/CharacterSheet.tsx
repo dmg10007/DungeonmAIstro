@@ -54,12 +54,106 @@ function InfoRow({ label, value }: { label: string; value?: string | number | nu
   );
 }
 
+/**
+ * Parses a free-text field that may contain [KEY:value] bracket tokens.
+ * Returns:
+ *   - tokens: array of { label, value } pairs extracted from brackets
+ *   - prose:  the remaining text with bracket tokens removed, trimmed
+ *
+ * Example:
+ *   "Era: 1920s | Occupation: PI | [HP:9][SAN:50]" →
+ *     tokens: [{label:'HP', value:'9'}, {label:'SAN', value:'50'}]
+ *     prose:  "Era: 1920s | Occupation: PI"
+ */
+function parseBracketTokens(text: string): { tokens: { label: string; value: string }[]; prose: string } {
+  const tokens: { label: string; value: string }[] = [];
+  const bracketRe = /\[([A-Za-z][A-Za-z0-9 _-]*):\s*([^\]]+)\]/g;
+  const prose = text
+    .replace(bracketRe, (_match, key, val) => {
+      tokens.push({ label: key.toUpperCase(), value: val.trim() });
+      return '';
+    })
+    // collapse leftover separators (|, ;, leading/trailing spaces)
+    .replace(/^[\s|;,]+|[\s|;,]+$/g, '')
+    .replace(/[\s|;,]{2,}/g, ' | ')
+    .trim();
+  return { tokens, prose };
+}
+
+/**
+ * Renders a field that may be plain text or contain [KEY:value] tokens.
+ * – If tokens are found they appear in a compact pill-grid below the prose.
+ * – If the prose consists of pipe-separated «Label: value» pairs (common
+ *   in CoC character dumps), they are rendered as InfoRows instead.
+ */
 function Block({ title, text }: { title: string; text?: string | null }) {
   if (!text) return null;
+  const { tokens, prose } = parseBracketTokens(text);
+
+  // Detect "Label: value | Label: value" style prose
+  const pipeSegments = prose
+    .split('|')
+    .map(s => s.trim())
+    .filter(Boolean);
+  const allKV = pipeSegments.length > 1 && pipeSegments.every(s => /^[^:]{1,30}:\s*.+/.test(s));
+
   return (
-    <div style={{ borderTop: '1px solid var(--color-divider)', paddingTop: 'var(--space-2)' }}>
-      <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 4 }}>{title}</div>
-      <p style={{ color: 'var(--color-text-muted)', lineHeight: 1.5, margin: 0, maxWidth: '100%', wordBreak: 'break-word', fontSize: 'var(--text-xs)' }}>{text}</p>
+    <div style={{ borderTop: '1px solid var(--color-divider)', paddingTop: 'var(--space-3)' }}>
+      <SectionHeader>{title}</SectionHeader>
+
+      {/* Pipe-separated key:value prose → InfoRows */}
+      {allKV
+        ? pipeSegments.map((seg, i) => {
+            const colonIdx = seg.indexOf(':');
+            const k = seg.slice(0, colonIdx).trim();
+            const v = seg.slice(colonIdx + 1).trim();
+            return <InfoRow key={i} label={k} value={v} />;
+          })
+        : prose && (
+            <p style={{
+              color: 'var(--color-text-muted)', lineHeight: 1.6, margin: 0,
+              maxWidth: '100%', wordBreak: 'break-word', fontSize: 'var(--text-xs)',
+              marginBottom: tokens.length ? 'var(--space-3)' : 0,
+            }}>
+              {prose}
+            </p>
+          )
+      }
+
+      {/* Bracket tokens → pill grid */}
+      {tokens.length > 0 && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))',
+          gap: 'var(--space-1)',
+          marginTop: allKV ? 'var(--space-3)' : undefined,
+        }}>
+          {tokens.map(({ label, value }, i) => (
+            <div key={i} style={{
+              background: 'var(--color-surface-offset)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-md)',
+              padding: 'var(--space-1) var(--space-2)',
+              textAlign: 'center',
+            }}>
+              <div style={{
+                fontWeight: 700,
+                fontSize: 'var(--text-xs)',
+                fontVariantNumeric: 'tabular-nums',
+                color: 'var(--color-text)',
+                lineHeight: 1.2,
+              }}>{value}</div>
+              <div style={{
+                color: 'var(--color-text-faint)',
+                fontSize: '9px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                marginTop: 1,
+              }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -140,23 +234,6 @@ function SheetDnDPF2e({ character, label }: { character: Character; label: strin
 
 // ---------------------------------------------------------------------------
 // Call of Cthulhu 7e sheet
-//
-// Field mapping (stored in the unified Character schema):
-//   str → STR    dex → DEX    con → CON
-//   int → INT    wis → POW    cha → APP
-//   speed        → MOV
-//   armorClass   → Dodge %
-//   hitPoints    → HP
-//   initiative   → DEX rank (if set)
-//   profBonus    → EDU (stored 0 if not applicable; CoC chargen sets it to 0)
-//   temporaryHP  → Magic Points
-//   level        → not used (stored 1)
-//   background   → Occupation
-//   equipment    → Possessions
-//   traits       → Personal Description / Notes
-//   ideals       → Ideology / Beliefs (repurposed)
-//   bonds        → Significant People (repurposed)
-//   flaws        → Fears / Phobias (repurposed)
 // ---------------------------------------------------------------------------
 const COC_CHAR_KEYS = [
   { key: 'str', label: 'STR' },
@@ -173,7 +250,6 @@ function SheetCoC7e({ character }: { character: Character }) {
 
   if (!s || typeof s.dex === 'undefined') return <MissingScores character={character} subtitle={subtitle} />;
 
-  // Half & fifth values for each characteristic
   function half(v: number)  { return Math.floor(v / 2); }
   function fifth(v: number) { return Math.floor(v / 5); }
 
@@ -223,28 +299,17 @@ function SheetCoC7e({ character }: { character: Character }) {
         <InfoRow label="EDU"        value={character.proficiencyBonus > 0 ? character.proficiencyBonus * 5 : undefined} />
       </div>
 
-      <Block title="Possessions"       text={character.equipment} />
+      <Block title="Possessions"        text={character.equipment} />
       <Block title="Description / Notes" text={character.traits} />
-      <Block title="Ideology / Beliefs" text={character.ideals} />
-      <Block title="Significant People" text={character.bonds} />
-      <Block title="Fears / Phobias"    text={character.flaws} />
+      <Block title="Ideology / Beliefs"  text={character.ideals} />
+      <Block title="Significant People"  text={character.bonds} />
+      <Block title="Fears / Phobias"     text={character.flaws} />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Shadowrun 6e sheet
-//
-// Field mapping:
-//   str → STR    dex → AGI    con → BOD
-//   int → REA    wis → WIL    cha → CHA
-//   armorClass   → Armor
-//   speed        → Initiative dice (stored as e.g. 9)
-//   initiative   → Initiative score
-//   profBonus    → Edge
-//   temporaryHP  → Essence (×10 to store as int; display as /10)
-//   background   → Metatype / Role
-//   equipment    → Gear / Cyberware
 // ---------------------------------------------------------------------------
 const SR_ATTR_KEYS = [
   { key: 'con', label: 'BOD' },
@@ -261,7 +326,7 @@ function SheetSR6e({ character }: { character: Character }) {
 
   if (!s || typeof s.dex === 'undefined') return <MissingScores character={character} subtitle={subtitle} />;
 
-  const essenceRaw = character.temporaryHitPoints ?? 60; // stored ×10
+  const essenceRaw = character.temporaryHitPoints ?? 60;
   const essence = (essenceRaw / 10).toFixed(1);
 
   return (
@@ -309,14 +374,13 @@ function SheetCustom({ character }: { character: Character }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', fontSize: 'var(--text-xs)' }}>
       <IdentityHeader character={character} subtitle={subtitle} />
 
-      {/* Stats — show whatever is non-default */}
       <div>
         <SectionHeader>Stats</SectionHeader>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)' }}>
           <StatBox label="HP"    value={`${character.currentHitPoints}/${character.hitPointMaximum}`} />
-          {character.armorClass > 0   && <StatBox label="Defense"  value={character.armorClass} />}
-          {character.speed > 0        && <StatBox label="Speed"    value={character.speed} />}
-          {character.proficiencyBonus > 0 && <StatBox label="Prof" value={`+${character.proficiencyBonus}`} />}
+          {character.armorClass > 0      && <StatBox label="Defense"  value={character.armorClass} />}
+          {character.speed > 0           && <StatBox label="Speed"    value={character.speed} />}
+          {character.proficiencyBonus > 0 && <StatBox label="Prof"    value={`+${character.proficiencyBonus}`} />}
         </div>
       </div>
 
