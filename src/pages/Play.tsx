@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import DOMPurify from 'dompurify';
 import DiceRoller from '../components/DiceRoller';
 import CombatTracker from '../components/CombatTracker';
+import CharacterSheet from '../components/CharacterSheet';
 import { getActiveCampaignId, loadCampaign, loadCharacter, appendEvent } from '../lib/storage';
 import { listVaultEntries } from '../lib/vault';
 import { sendToDM } from '../lib/dm';
@@ -23,11 +24,6 @@ const NARRATIVE_LABELS: Record<number, string> = {
 };
 const VERBOSITY_LABELS: Record<number, string> = {
   1: 'Terse', 2: 'Concise', 3: 'Balanced', 4: 'Rich', 5: 'Verbose',
-};
-
-const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
-const ABILITY_LABELS: Record<string, string> = {
-  str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA',
 };
 
 function detectCrit(result: DiceRollResult): 'nat20' | 'nat1' | null {
@@ -175,101 +171,6 @@ function PassphraseModal({ onSubmit, onCancel, error }: {
   );
 }
 
-function CharacterSheet({ character }: { character: Character }) {
-  const scores = character.abilityScores;
-
-  if (!scores || typeof scores.dex === 'undefined') {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', fontSize: 'var(--text-xs)' }}>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-base)', color: 'var(--color-primary)', fontWeight: 700 }}>
-          {character.characterName}
-        </div>
-        <div style={{ color: 'var(--color-text-muted)' }}>
-          {character.race} {character.class} · Level {character.level}
-        </div>
-        <div style={{ color: 'var(--color-warning)', background: 'var(--color-warning-highlight)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)' }}>
-          ⚠ Ability scores are missing from this character's saved data. Re-create or re-save the character to fix this.
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', fontSize: 'var(--text-xs)' }}>
-      <div>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-base)', color: 'var(--color-primary)', fontWeight: 700, marginBottom: 2 }}>
-          {character.characterName}
-        </div>
-        <div style={{ color: 'var(--color-text-muted)' }}>
-          {character.race} {character.class} · Level {character.level}
-          {character.background ? ` · ${character.background}` : ''}
-        </div>
-        {character.alignment && (
-          <div style={{ color: 'var(--color-text-faint)', marginTop: 2 }}>{character.alignment}</div>
-        )}
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)' }}>
-        {([
-          { label: 'AC',      value: character.armorClass },
-          { label: 'HP',      value: `${character.currentHitPoints}/${character.hitPointMaximum}` },
-          { label: 'Speed',   value: `${character.speed}ft` },
-          { label: 'Prof',    value: `+${character.proficiencyBonus}` },
-          { label: 'Init',    value: formatModifier(character.initiative ?? abilityModifier(scores.dex)) },
-          { label: 'Temp HP', value: character.temporaryHitPoints ?? 0 },
-        ] as { label: string; value: string | number }[]).map(({ label, value }) => (
-          <div key={label} style={{ background: 'var(--color-surface-offset)', borderRadius: 'var(--radius-md)', padding: 'var(--space-2)', textAlign: 'center' }}>
-            <div style={{ fontWeight: 700, fontSize: 'var(--text-sm)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-            <div style={{ color: 'var(--color-text-muted)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 1 }}>{label}</div>
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 'var(--space-2)' }}>Ability Scores</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)' }}>
-          {ABILITY_KEYS.map(k => {
-            const score = scores[k];
-            const mod = abilityModifier(score);
-            return (
-              <div key={k} style={{ background: 'var(--color-surface-offset)', borderRadius: 'var(--radius-md)', padding: 'var(--space-2)', textAlign: 'center' }}>
-                <div style={{ fontWeight: 700, fontSize: 'var(--text-sm)' }}>{score}</div>
-                <div style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: '10px' }}>{formatModifier(mod)}</div>
-                <div style={{ color: 'var(--color-text-muted)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{ABILITY_LABELS[k]}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {character.spellcastingClass && (
-        <div style={{ borderTop: '1px solid var(--color-divider)', paddingTop: 'var(--space-2)' }}>
-          <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 'var(--space-2)' }}>Spellcasting</div>
-          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-            {character.spellcastingAbility && <span><strong>{character.spellcastingAbility.toUpperCase()}</strong> ability</span>}
-            {character.spellSaveDC != null && <span>Save DC <strong>{character.spellSaveDC}</strong></span>}
-            {character.spellAttackBonus != null && <span>Atk <strong>{formatModifier(character.spellAttackBonus)}</strong></span>}
-          </div>
-        </div>
-      )}
-
-      {character.equipment && (
-        <div style={{ borderTop: '1px solid var(--color-divider)', paddingTop: 'var(--space-2)' }}>
-          <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 4 }}>Equipment</div>
-          <p style={{ color: 'var(--color-text-muted)', lineHeight: 1.5, margin: 0, maxWidth: '100%', wordBreak: 'break-word' }}>{character.equipment}</p>
-        </div>
-      )}
-
-      {character.traits && (
-        <div style={{ borderTop: '1px solid var(--color-divider)', paddingTop: 'var(--space-2)' }}>
-          <div style={{ fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '10px', marginBottom: 4 }}>Traits</div>
-          <p style={{ color: 'var(--color-text-muted)', lineHeight: 1.5, margin: 0, maxWidth: '100%', wordBreak: 'break-word' }}>{character.traits}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function Play() {
   const navigate = useNavigate();
   const campaignId = getActiveCampaignId();
@@ -304,6 +205,8 @@ export default function Play() {
   const rulesLabel = useMemo(() => RULES_LABELS[campaign?.options.rulesStrictness ?? 3], [campaign?.options.rulesStrictness]);
   const narrativeLabel = useMemo(() => NARRATIVE_LABELS[campaign?.options.narrativeStyle ?? 3], [campaign?.options.narrativeStyle]);
   const verbosityLabel = useMemo(() => VERBOSITY_LABELS[campaign?.options.responseVerbosity ?? 3], [campaign?.options.responseVerbosity]);
+
+  const ruleset = campaign?.options.ruleset ?? 'dnd5e';
 
   if (!campaign) {
     return (
@@ -605,7 +508,7 @@ export default function Play() {
           )}
           {panel === 'sheet' && activeCharacter && (
             <div className="card">
-              <CharacterSheet character={activeCharacter} />
+              <CharacterSheet character={activeCharacter} ruleset={ruleset} />
             </div>
           )}
 
@@ -642,7 +545,7 @@ export default function Play() {
               {campaign.characters.map(c => (
                 <div key={c.id} style={{ fontSize: 'var(--text-xs)', display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', color: 'var(--color-text-muted)' }}>
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{c.characterName}</span>
-                  <span style={{ flexShrink: 0 }}>{c.class} {c.level}</span>
+                  <span style={{ flexShrink: 0 }}>{c.class} {c.level > 0 ? c.level : ''}</span>
                 </div>
               ))}
             </div>
@@ -690,11 +593,9 @@ export default function Play() {
       <style>{`
         /* ── Play page: fills the entire viewport below the nav ── */
         .play-grid {
-          /* Full width — no centering, no max-width that could exceed viewport */
           width: 100%;
           box-sizing: border-box;
           display: grid;
-          /* Chat takes all remaining space; sidebar is a fixed 280px column */
           grid-template-columns: 1fr 280px;
           gap: var(--space-4);
           height: calc(100dvh - 64px);
@@ -706,11 +607,10 @@ export default function Play() {
           display: flex;
           flex-direction: column;
           gap: var(--space-3);
-          min-width: 0;   /* critical: let the flex child shrink below its content size */
+          min-width: 0;
           overflow: hidden;
         }
 
-        /* Chat header: title + badge + button — wraps on narrow viewports */
         .play-chat-header {
           display: flex;
           align-items: center;
@@ -733,7 +633,6 @@ export default function Play() {
           white-space: nowrap;
         }
 
-        /* Sidebar: fixed-width column, only scrolls vertically */
         .play-sidebar {
           width: 280px;
           min-width: 0;
@@ -744,7 +643,6 @@ export default function Play() {
           overflow-x: hidden;
         }
 
-        /* Tool panel button row: 3 equal buttons that always fit the 280px sidebar */
         .play-sidebar-btns {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
@@ -752,7 +650,6 @@ export default function Play() {
           flex-shrink: 0;
         }
         .play-sidebar-btns .btn {
-          /* Override default btn padding so buttons fit in 280px ÷ 3 */
           padding: var(--space-2) var(--space-2);
           justify-content: center;
           font-size: var(--text-xs);
@@ -783,7 +680,6 @@ export default function Play() {
           .play-sidebar-btns {
             grid-column: 1 / -1;
           }
-          /* Open panel cards span full width */
           .play-sidebar > .card:nth-child(2),
           .play-sidebar > .card:nth-child(3),
           .play-sidebar > .card:nth-child(4) {
