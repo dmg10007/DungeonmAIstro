@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import DOMPurify from 'dompurify';
 import DiceRoller from '../components/DiceRoller';
@@ -26,6 +26,11 @@ const VERBOSITY_LABELS: Record<number, string> = {
   1: 'Terse', 2: 'Concise', 3: 'Balanced', 4: 'Rich', 5: 'Verbose',
 };
 
+// ── Clamp sidebar width between these pixel bounds ──────────────────────────
+const SIDEBAR_MIN = 200;
+const SIDEBAR_MAX = 600;
+const SIDEBAR_DEFAULT = 280;
+
 function detectCrit(result: DiceRollResult): 'nat20' | 'nat1' | null {
   if (!result.notation.toLowerCase().includes('d20')) return null;
   if (result.rolls.includes(20)) return 'nat20';
@@ -50,7 +55,7 @@ function buildRollNotifyMessage(result: DiceRollResult): string {
 const SLASH_RE = /^\/(?:roll|r)\s+(.*)/i;
 const ADV_SHORTHAND = /^\/adv(?:antage)?\s*(.*)/i;
 const DIS_SHORTHAND = /^\/dis(?:advantage)?\s*(.*)/i;
-const NOTATION_RE = /^(\d{1,2})?d(4|6|8|10|12|20|100)([+-]\d{1,3})?/i;
+const NOTATION_RE = /^(\d{1,2})?d(100|4|6|8|10|12|20)([+-]\d{1,3})?/i;
 
 interface SlashRollParsed {
   type: 'roll';
@@ -171,6 +176,39 @@ function PassphraseModal({ onSubmit, onCancel, error }: {
   );
 }
 
+// ── Drag-to-resize hook ──────────────────────────────────────────────────────
+function useResizableSplit(defaultWidth: number) {
+  const [sidebarWidth, setSidebarWidth] = useState(defaultWidth);
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(defaultWidth);
+
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    // Only activate on primary button / touch
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    dragging.current = true;
+    startX.current = e.clientX;
+    startWidth.current = sidebarWidth;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }, [sidebarWidth]);
+
+  const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    // Moving the handle LEFT increases sidebar width (handle is on the left
+    // edge of the sidebar, so delta is inverted)
+    const delta = startX.current - e.clientX;
+    const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startWidth.current + delta));
+    setSidebarWidth(next);
+  }, []);
+
+  const onPointerUp = useCallback(() => {
+    dragging.current = false;
+  }, []);
+
+  return { sidebarWidth, onPointerDown, onPointerMove, onPointerUp };
+}
+
 export default function Play() {
   const navigate = useNavigate();
   const campaignId = getActiveCampaignId();
@@ -195,6 +233,8 @@ export default function Play() {
   const passphraseRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const { sidebarWidth, onPointerDown, onPointerMove, onPointerUp } = useResizableSplit(SIDEBAR_DEFAULT);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, streamingText]);
   useEffect(() => () => { abortRef.current?.abort(); }, []);
@@ -341,7 +381,14 @@ export default function Play() {
         />
       )}
 
-      <div className="play-grid">
+      {/* Outer wrapper receives pointer events for the drag handle */}
+      <div
+        className="play-grid"
+        style={{ gridTemplateColumns: `1fr 5px ${sidebarWidth}px` }}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+      >
 
         {/* ── Chat column ── */}
         <div className="play-chat-col">
@@ -480,6 +527,20 @@ export default function Play() {
           </div>
         </div>
 
+        {/* ── Drag handle ── */}
+        <div
+          className="play-drag-handle"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          title="Drag to resize"
+          aria-hidden="true"
+          role="separator"
+          aria-orientation="vertical"
+        >
+          <span className="play-drag-dots" />
+        </div>
+
         {/* ── Sidebar ── */}
         <div className="play-sidebar">
 
@@ -596,10 +657,10 @@ export default function Play() {
           width: 100%;
           box-sizing: border-box;
           display: grid;
-          grid-template-columns: 1fr 280px;
-          gap: var(--space-4);
+          /* columns set inline via sidebarWidth state: 1fr 5px <N>px */
+          gap: 0;
           height: calc(100dvh - 64px);
-          padding: var(--space-4) var(--space-4);
+          padding: var(--space-4);
           overflow: hidden;
         }
 
@@ -609,6 +670,7 @@ export default function Play() {
           gap: var(--space-3);
           min-width: 0;
           overflow: hidden;
+          padding-right: var(--space-4);
         }
 
         .play-chat-header {
@@ -633,14 +695,48 @@ export default function Play() {
           white-space: nowrap;
         }
 
+        /* ── Drag handle ── */
+        .play-drag-handle {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 5px;
+          cursor: col-resize;
+          background: transparent;
+          position: relative;
+          z-index: 10;
+          flex-shrink: 0;
+          transition: background 120ms ease;
+          touch-action: none;
+          user-select: none;
+        }
+        .play-drag-handle:hover,
+        .play-drag-handle:active {
+          background: var(--color-primary);
+          border-radius: var(--radius-full);
+        }
+        .play-drag-dots {
+          display: block;
+          width: 3px;
+          height: 32px;
+          border-radius: var(--radius-full);
+          background: var(--color-border);
+          pointer-events: none;
+          transition: background 120ms ease;
+        }
+        .play-drag-handle:hover .play-drag-dots,
+        .play-drag-handle:active .play-drag-dots {
+          background: white;
+        }
+
         .play-sidebar {
-          width: 280px;
           min-width: 0;
           display: flex;
           flex-direction: column;
           gap: var(--space-3);
           overflow-y: auto;
           overflow-x: hidden;
+          padding-left: var(--space-3);
         }
 
         .play-sidebar-btns {
@@ -657,16 +753,19 @@ export default function Play() {
           overflow: hidden;
         }
 
-        /* ── Tablet (<= 900px): stack sidebar below chat ── */
+        /* ── Tablet (<= 900px): hide drag handle, stack sidebar below chat ── */
         @media (max-width: 900px) {
           .play-grid {
-            grid-template-columns: 1fr;
+            grid-template-columns: 1fr !important;
+            grid-template-rows: auto;
             height: auto;
             overflow: visible;
           }
+          .play-drag-handle { display: none; }
           .play-chat-col {
             height: clamp(400px, 55dvh, 680px);
             overflow: hidden;
+            padding-right: 0;
           }
           .play-sidebar {
             width: 100%;
@@ -676,6 +775,7 @@ export default function Play() {
             grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
             gap: var(--space-3);
             align-items: start;
+            padding-left: 0;
           }
           .play-sidebar-btns {
             grid-column: 1 / -1;
