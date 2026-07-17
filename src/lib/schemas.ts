@@ -37,6 +37,8 @@ export type Ruleset = z.infer<typeof Ruleset>;
 
 // ----------------------------------------------------------------
 // Dice
+// NOTE: 100 MUST come before 10 in the alternation so the regex
+// engine matches the longer token first (d100 ≠ d10 + trailing "0").
 // ----------------------------------------------------------------
 export const dieFaceSchema = z.union([
   z.literal(4), z.literal(6), z.literal(8),
@@ -46,7 +48,8 @@ export type DieFace = z.infer<typeof dieFaceSchema>;
 
 export const diceNotationSchema = z
   .string()
-  .regex(/^(\d{1,2})?d(4|6|8|10|12|20|100)([+-]\d{1,3})?$/i, 'Invalid dice notation');
+  // 100 before 10 — longest match wins
+  .regex(/^(\d{1,2})?d(100|4|6|8|10|12|20)([+-]\d{1,3})?$/i, 'Invalid dice notation');
 
 export const diceRollResultSchema = z.object({
   notation: diceNotationSchema,
@@ -88,7 +91,7 @@ export type DiceRollResult = z.infer<typeof diceRollResultSchema>;
 //     PF2e          : 1–20
 //     CoC 7e        : no levels (store 1)
 //     SR6e          : Karma track, no hard cap
-//     → min 0 (so CoC characters don't fail), max 30
+//     → min 0 (so CoC characters don’t fail), max 30
 //
 //   Speed
 //     D&D 5e        : 0–120 ft

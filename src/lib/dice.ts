@@ -8,17 +8,23 @@ export function rollDie(faces: DieFace): number {
   return (arr[0] % faces) + 1;
 }
 
-/** Parse and roll dice notation like "2d6+3", "d20", "1d8-1" */
+// NOTE: 100 MUST precede 10 in this alternation — regex engines are
+// greedy left-to-right, so "d10" inside "d100" would match first
+// if 10 were listed before 100.
+const DICE_PARSE_RE = /^(\d{1,2})?d(100|4|6|8|10|12|20)([+-]\d{1,3})?$/i;
+
+/** Parse and roll dice notation like "2d6+3", "d20", "d100", "1d8-1" */
 export function roll(
   notation: string,
   actorType: DiceRollResult['actorType'] = 'system',
   actorId?: string,
   reason?: string
 ): DiceRollResult {
-  const parsed = diceNotationSchema.safeParse(notation.toLowerCase().trim());
+  const normalised = notation.toLowerCase().trim();
+  const parsed = diceNotationSchema.safeParse(normalised);
   if (!parsed.success) throw new Error(`Invalid dice notation: ${notation}`);
 
-  const match = notation.match(/^(\d{1,2})?d(4|6|8|10|12|20|100)([+-]\d{1,3})?$/i);
+  const match = normalised.match(DICE_PARSE_RE);
   if (!match) throw new Error(`Unparseable notation: ${notation}`);
 
   const count = parseInt(match[1] ?? '1', 10);
@@ -29,10 +35,12 @@ export function roll(
   const total = rolls.reduce((a, b) => a + b, 0) + modifier;
 
   return {
-    notation,
+    notation: normalised,
     rolls,
     modifier,
-    total: Math.max(total, 1), // floor at 1 per 5e rules
+    // Only apply the floor-at-1 rule for d20-system games; percentile and
+    // other dice can legitimately produce 0 after a negative modifier.
+    total: faces === 20 ? Math.max(total, 1) : total,
     actorType,
     actorId,
     reason,
