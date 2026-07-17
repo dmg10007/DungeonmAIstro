@@ -184,7 +184,6 @@ function useResizableSplit(defaultWidth: number) {
   const startWidth = useRef(defaultWidth);
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    // Only activate on primary button / touch
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     dragging.current = true;
     startX.current = e.clientX;
@@ -195,8 +194,6 @@ function useResizableSplit(defaultWidth: number) {
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragging.current) return;
-    // Moving the handle LEFT increases sidebar width (handle is on the left
-    // edge of the sidebar, so delta is inverted)
     const delta = startX.current - e.clientX;
     const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startWidth.current + delta));
     setSidebarWidth(next);
@@ -229,7 +226,7 @@ export default function Play() {
   const [passphraseError, setPassphraseError] = useState<string | null>(null);
   const [pendingInput, setPendingInput] = useState('');
   const [dmError, setDmError] = useState<string | null>(null);
-  const [notifyDMOnRoll, setNotifyDMOnRoll] = useState(false);
+  const [notifyDMOnRoll, setNotifyDMOnRoll] = useState(true); // on by default
   const passphraseRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -381,7 +378,6 @@ export default function Play() {
         />
       )}
 
-      {/* Outer wrapper receives pointer events for the drag handle */}
       <div
         className="play-grid"
         style={{ gridTemplateColumns: `1fr 5px ${sidebarWidth}px` }}
@@ -392,7 +388,6 @@ export default function Play() {
 
         {/* ── Chat column ── */}
         <div className="play-chat-col">
-          {/* Header: title + badge + Open Scene */}
           <div className="play-chat-header">
             <h1 className="play-title">{campaign.title}</h1>
             <span className="badge">{campaign.options.mode === 'one_shot' ? 'One-shot' : 'Campaign'}</span>
@@ -544,7 +539,6 @@ export default function Play() {
         {/* ── Sidebar ── */}
         <div className="play-sidebar">
 
-          {/* Tool panel toggle buttons */}
           <div className="play-sidebar-btns">
             <button className={`btn ${panel === 'dice' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPanel(p => p === 'dice' ? null : 'dice')}>🎲 Dice</button>
             <button className={`btn ${panel === 'combat' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPanel(p => p === 'combat' ? null : 'combat')}>⚔ Combat</button>
@@ -652,12 +646,10 @@ export default function Play() {
       </div>
 
       <style>{`
-        /* ── Play page: fills the entire viewport below the nav ── */
         .play-grid {
           width: 100%;
           box-sizing: border-box;
           display: grid;
-          /* columns set inline via sidebarWidth state: 1fr 5px <N>px */
           gap: 0;
           height: calc(100dvh - 64px);
           padding: var(--space-4);
@@ -695,7 +687,6 @@ export default function Play() {
           white-space: nowrap;
         }
 
-        /* ── Drag handle ── */
         .play-drag-handle {
           display: flex;
           align-items: center;
@@ -753,7 +744,6 @@ export default function Play() {
           overflow: hidden;
         }
 
-        /* ── Tablet (<= 900px): hide drag handle, stack sidebar below chat ── */
         @media (max-width: 900px) {
           .play-grid {
             grid-template-columns: 1fr !important;
@@ -787,7 +777,6 @@ export default function Play() {
           }
         }
 
-        /* ── Mobile (<= 540px) ── */
         @media (max-width: 540px) {
           .play-grid {
             padding: var(--space-3);
