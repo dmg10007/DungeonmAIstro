@@ -1,36 +1,60 @@
 /**
- * storage.ts — Typed localStorage/sessionStorage helpers.
+ * storage.ts — Typed localStorage helpers.
  * All IDs use crypto.randomUUID() — no external dependency.
+ *
+ * safeSet() wraps every localStorage.setItem call so that a
+ * QuotaExceededError (common on mobile Safari / private browsing)
+ * throws a readable Error instead of silently swallowing the write
+ * and leaving the caller hanging.
  */
 
 import type { Character } from '../types';
 import type { AdventureOptions, DiceRollResult } from './schemas';
 
-// ─── ID generation ────────────────────────────────────────────────────────────────────────────
+// ─── ID generation ──────────────────────────────────────────────────────────
 export function generateId(): string { return crypto.randomUUID(); }
 /** Alias used by CharacterLab */
 export const newId = generateId;
 
-// ─── Storage keys ───────────────────────────────────────────────────────────────────────
-const CAMPAIGNS_KEY    = 'dm_campaigns_v1';
-const ACTIVE_KEY       = 'dm_active_campaign';
-const CHARACTER_KEY    = 'dm_character_v1';
-const SESSION_KEY      = 'dm_session_v1';
+// ─── Storage keys ───────────────────────────────────────────────────────────
+const CAMPAIGNS_KEY  = 'dm_campaigns_v1';
+const ACTIVE_KEY     = 'dm_active_campaign';
+const CHARACTER_KEY  = 'dm_character_v1';
+const SESSION_KEY    = 'dm_session_v1';
+
+// ─── Safe writer — surfaces QuotaExceededError on mobile ───────────────────
+function safeSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    const isQuota =
+      err instanceof DOMException &&
+      // covers all browser vendor prefixes
+      (err.code === 22 ||
+        err.code === 1014 ||
+        err.name === 'QuotaExceededError' ||
+        err.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+    if (isQuota) {
+      throw new Error(
+        'Storage is full. Please clear some browser data or disable private browsing mode and try again.'
+      );
+    }
+    throw err;
+  }
+}
 
 function safeParse<T>(raw: string | null): T | null {
   if (!raw) return null;
   try { return JSON.parse(raw) as T; } catch { return null; }
 }
 
-// ─── Campaign shape used throughout the app ────────────────────────────────────────────────────
+// ─── Campaign shape ─────────────────────────────────────────────────────────
 export interface StoredCampaign {
   id: string;
   title: string;
   options: AdventureOptions;
   /** mode mirrors options.mode for quick access */
   mode: string;
-  // 'event' messages are display-only (dice rolls, game events).
-  // dm.ts filters them out before persisting and before sending to the LLM.
   messages: Array<{ role: 'user' | 'assistant' | 'system' | 'event'; content: string; timestamp: string }>;
   characters: StoredCharacterRef[];
   events: CampaignEvent[];
@@ -52,7 +76,7 @@ export interface CampaignEvent {
   [key: string]: any;
 }
 
-// ─── Campaign list (summaries) ────────────────────────────────────────────────────────────────
+// ─── Campaign list (summaries) ───────────────────────────────────────────────
 export interface CampaignSummary {
   id: string;
   title: string;
@@ -65,7 +89,7 @@ function loadSummaries(): CampaignSummary[] {
 }
 
 function saveSummaries(list: CampaignSummary[]): void {
-  localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(list));
+  safeSet(CAMPAIGNS_KEY, JSON.stringify(list));
 }
 
 export function listCampaigns(): CampaignSummary[] {
@@ -74,18 +98,18 @@ export function listCampaigns(): CampaignSummary[] {
   );
 }
 
-// ─── Active campaign pointer ──────────────────────────────────────────────────────────────
+// ─── Active campaign pointer ─────────────────────────────────────────────────
 export function getActiveCampaignId(): string | null {
   return localStorage.getItem(ACTIVE_KEY);
 }
 export function setActiveCampaignId(id: string): void {
-  localStorage.setItem(ACTIVE_KEY, id);
+  safeSet(ACTIVE_KEY, id);
 }
 export function clearActiveCampaign(): void {
   localStorage.removeItem(ACTIVE_KEY);
 }
 
-// ─── Full campaign CRUD ────────────────────────────────────────────────────────────────────────
+// ─── Full campaign CRUD ──────────────────────────────────────────────────────
 export function createCampaign(
   title: string,
   options: AdventureOptions,
@@ -104,7 +128,9 @@ export function createCampaign(
     createdAt: now,
     updatedAt: now,
   };
-  localStorage.setItem(`dm_campaign_${id}`, JSON.stringify(campaign));
+  // All three writes go through safeSet — any QuotaExceededError bubbles up
+  // to the caller (Setup.tsx handleSubmit) and is shown as a user-facing error.
+  safeSet(`dm_campaign_${id}`, JSON.stringify(campaign));
   const summaries = loadSummaries();
   summaries.unshift({ id, title: campaign.title, mode: campaign.mode, updatedAt: now });
   saveSummaries(summaries);
@@ -118,7 +144,7 @@ export function loadCampaign(id: string): StoredCampaign | null {
 
 export function saveCampaign(campaign: StoredCampaign): void {
   campaign.updatedAt = new Date().toISOString();
-  localStorage.setItem(`dm_campaign_${campaign.id}`, JSON.stringify(campaign));
+  safeSet(`dm_campaign_${campaign.id}`, JSON.stringify(campaign));
   const summaries = loadSummaries().filter(s => s.id !== campaign.id);
   summaries.unshift({ id: campaign.id, title: campaign.title, mode: campaign.mode, updatedAt: campaign.updatedAt });
   saveSummaries(summaries);
@@ -138,9 +164,9 @@ export function appendEvent(campaignId: string, event: CampaignEvent): void {
   saveCampaign(campaign);
 }
 
-// ─── Character ────────────────────────────────────────────────────────────────────────────
+// ─── Character ───────────────────────────────────────────────────────────────
 export function saveCharacter(data: Character): void {
-  localStorage.setItem(CHARACTER_KEY, JSON.stringify(data));
+  safeSet(CHARACTER_KEY, JSON.stringify(data));
 }
 export function loadCharacter(): Character | null {
   return safeParse<Character>(localStorage.getItem(CHARACTER_KEY));
@@ -149,13 +175,29 @@ export function clearCharacter(): void {
   localStorage.removeItem(CHARACTER_KEY);
 }
 
-// ─── Session (tab-scoped) ──────────────────────────────────────────────────────────────────────
+// ─── Session (tab-scoped) ────────────────────────────────────────────────────
 export function saveSession(data: unknown): void {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(data));
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(data));
+  } catch {
+    // sessionStorage quota failures are non-critical — ignore silently
+  }
 }
 export function loadSession<T>(): T | null {
   return safeParse<T>(sessionStorage.getItem(SESSION_KEY));
 }
 export function clearSession(): void {
   sessionStorage.removeItem(SESSION_KEY);
+}
+
+// ─── Storage diagnostics (optional, used by Settings page) ──────────────────
+/** Returns approximate localStorage usage in bytes. */
+export function storageUsageBytes(): number {
+  let total = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i) ?? '';
+    total += key.length + (localStorage.getItem(key)?.length ?? 0);
+  }
+  // UTF-16 encoding: each char ≈ 2 bytes
+  return total * 2;
 }

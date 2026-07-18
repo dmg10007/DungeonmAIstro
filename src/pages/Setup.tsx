@@ -84,6 +84,7 @@ export default function Setup() {
   const [narrativeStyle, setNarrativeStyle] = useState(3);
   const [responseVerbosity, setResponseVerbosity] = useState(3);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   function toggleTone(t: string) {
     setTone(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
@@ -91,26 +92,49 @@ export default function Setup() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const options = {
-      ruleset,
-      customRulesetName: ruleset === 'custom' ? customRulesetName : undefined,
-      customRulesetDescription: ruleset === 'custom' ? customRulesetDescription : undefined,
-      mode,
-      playerCount,
-      experienceLevel,
-      tone,
-      desiredLength,
-      settingPrompt,
-      safetyMode,
-      rulesStrictness,
-      narrativeStyle,
-      responseVerbosity,
-    };
-    const parsed = adventureOptionsSchema.safeParse(options);
-    if (!parsed.success) { setError(parsed.error.errors[0].message); return; }
-    const title = settingPrompt.slice(0, 60) || `${mode === 'one_shot' ? 'One-shot' : 'Campaign'} — ${new Date().toLocaleDateString()}`;
-    createCampaign(title, parsed.data, []);
-    navigate('/characters');
+    setError(null);
+    setSubmitting(true);
+
+    try {
+      const options = {
+        ruleset,
+        customRulesetName: ruleset === 'custom' ? customRulesetName : undefined,
+        customRulesetDescription: ruleset === 'custom' ? customRulesetDescription : undefined,
+        mode,
+        playerCount,
+        experienceLevel,
+        tone,
+        desiredLength,
+        settingPrompt,
+        safetyMode,
+        rulesStrictness,
+        narrativeStyle,
+        responseVerbosity,
+      };
+
+      const parsed = adventureOptionsSchema.safeParse(options);
+      if (!parsed.success) {
+        setError(parsed.error.errors[0].message);
+        setSubmitting(false);
+        return;
+      }
+
+      const title =
+        settingPrompt.trim().slice(0, 60) ||
+        `${mode === 'one_shot' ? 'One-shot' : 'Campaign'} — ${new Date().toLocaleDateString()}`;
+
+      createCampaign(title, parsed.data, []);
+      navigate('/characters');
+    } catch (err) {
+      // Catches QuotaExceededError from safeSet() in storage.ts,
+      // plus any other unexpected runtime errors.
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'An unexpected error occurred. Please try again.'
+      );
+      setSubmitting(false);
+    }
   }
 
   const sectionLabel: React.CSSProperties = { fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--space-2)', display: 'block' };
@@ -149,11 +173,9 @@ export default function Setup() {
               </button>
             ))}
           </div>
-          {/* Description of selected ruleset */}
           <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
             {RULESET_OPTIONS.find(o => o.id === ruleset)?.description}
           </p>
-          {/* Custom ruleset fields */}
           {ruleset === 'custom' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
               <div>
@@ -319,10 +341,26 @@ export default function Setup() {
           </div>
         </fieldset>
 
-        {error && <p role="alert" style={{ color: 'var(--color-error)', fontSize: 'var(--text-sm)' }}>{error}</p>}
+        {error && (
+          <div role="alert" style={{
+            background: 'var(--color-error-highlight)',
+            border: '1px solid var(--color-error)',
+            borderRadius: 'var(--radius-md)',
+            padding: 'var(--space-3) var(--space-4)',
+            color: 'var(--color-error)',
+            fontSize: 'var(--text-sm)',
+          }}>
+            {error}
+          </div>
+        )}
 
-        <button type="submit" className="btn btn-primary" style={{ fontSize: 'var(--text-base)', padding: 'var(--space-3) var(--space-8)' }}>
-          Next: Add Characters &rarr;
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={submitting}
+          style={{ fontSize: 'var(--text-base)', padding: 'var(--space-3) var(--space-8)' }}
+        >
+          {submitting ? 'Saving…' : 'Next: Add Characters →'}
         </button>
       </form>
     </div>
