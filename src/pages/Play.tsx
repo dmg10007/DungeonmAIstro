@@ -537,14 +537,15 @@ export default function Play() {
 
         {/* ── Sidebar ── */}
         {/*
-          Layout intent:
-          - The sidebar is a flex column that fills the full viewport height.
-          - The tool-button row and any non-sheet cards are fixed-height (flex-shrink:0).
-          - When the sheet panel is open, .sheet-card gets flex:1 and min-height:0
-            so it expands to fill ALL remaining vertical space.
-          - The sheet's internal scroll region (.sheet-scroll) then handles overflow.
-          - The sidebar itself does NOT scroll — the sheet card IS the scroll region.
-          - When the sheet is closed the sidebar reverts to normal overflow-y:auto.
+          Height chain:
+            .play-grid          — fixed height (100dvh - 64px), overflow:hidden
+            .play-sidebar       — height:100%, overflow:hidden, flex column
+            .sheet-card         — flex:1 1 0, min-height:0  →  expands to fill remainder
+            .sheet-scroll       — flex:1, overflow-y:auto   →  scrolls sheet content
+            .sidebar-static     — flex-shrink:0, overflow-y:auto (its own scroll region)
+
+          Key rule: every ancestor in the chain must have a DEFINITE height.
+          height:100% propagates the grid cell's definite height down into the sidebar.
         */}
         <div className={`play-sidebar${panel === 'sheet' ? ' sidebar-sheet-open' : ''}`}>
 
@@ -611,14 +612,14 @@ export default function Play() {
                 </label>
               </div>
 
-              {/* Scrollable sheet body — this is the ONE scroll region for the sheet */}
+              {/* Scrollable sheet body — the ONE scroll region for the sheet */}
               <div className="sheet-scroll">
                 <CharacterSheet character={activeCharacter} ruleset={ruleset} full={sheetFullView} />
               </div>
             </div>
           )}
 
-          {/* ── Static sidebar cards (always visible, shrink below sheet) ── */}
+          {/* ── Static sidebar cards (always visible) ── */}
           <div className="sidebar-static">
             {/* Notify DM toggle */}
             <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
@@ -774,9 +775,17 @@ export default function Play() {
           background: white;
         }
 
-        /* ── Sidebar base ── */
+        /*
+         * SIDEBAR HEIGHT CHAIN
+         * ====================
+         * .play-grid has a definite height (calc(100dvh - 64px)).
+         * Grid children (.play-sidebar) are given height:100% so they
+         * inherit that definite height as their own sizing context.
+         * With a definite height, flex:1 on .sheet-card can finally expand.
+         */
         .play-sidebar {
           min-width: 0;
+          height: 100%;
           display: flex;
           flex-direction: column;
           gap: var(--space-3);
@@ -785,18 +794,20 @@ export default function Play() {
           padding-left: var(--space-3);
         }
 
-        /*
-         * When the sheet panel is open the sidebar stops scrolling itself.
-         * Instead, .sheet-card expands to fill all remaining vertical space
-         * and its inner .sheet-scroll handles the overflow.
-         * .sidebar-static scrolls independently below the sheet card.
-         */
+        /* When sheet is open: stop the sidebar scrolling itself */
         .sidebar-sheet-open {
           overflow: hidden;
         }
+        /* sheet-card fills ALL remaining sidebar height */
         .sidebar-sheet-open .sheet-card {
           flex: 1 1 0;
           min-height: 0;
+        }
+        /* sidebar-static gets a capped height and scrolls independently */
+        .sidebar-sheet-open .sidebar-static {
+          max-height: 40%;
+          overflow-y: auto;
+          flex-shrink: 0;
         }
 
         .play-sidebar-btns {
@@ -813,16 +824,15 @@ export default function Play() {
           overflow: hidden;
         }
 
-        /* Sheet card */
+        /* Sheet card: flex column so .sheet-scroll can be flex:1 */
         .sheet-card {
           display: flex;
           flex-direction: column;
-          /* Default (no sheet open): natural height, sidebar scrolls */
           flex-shrink: 0;
           overflow: hidden;
         }
 
-        /* Sheet scroll region */
+        /* Sheet scroll: the ONE scroll region for sheet content */
         .sheet-scroll {
           overflow-y: auto;
           overflow-x: hidden;
@@ -844,9 +854,6 @@ export default function Play() {
           flex-direction: column;
           gap: var(--space-3);
           flex-shrink: 0;
-          /* When sheet is open, this section scrolls independently */
-          overflow-y: auto;
-          overflow-x: hidden;
           scrollbar-width: thin;
           scrollbar-color: var(--color-border) transparent;
         }
@@ -870,6 +877,7 @@ export default function Play() {
           }
           .play-sidebar {
             width: 100%;
+            height: auto;
             overflow: visible;
             overflow-x: hidden;
             display: grid;
@@ -879,6 +887,13 @@ export default function Play() {
             padding-left: 0;
           }
           .sidebar-sheet-open {
+            overflow: visible;
+          }
+          .sidebar-sheet-open .sheet-card {
+            flex: none;
+          }
+          .sidebar-sheet-open .sidebar-static {
+            max-height: none;
             overflow: visible;
           }
           .play-sidebar-btns { grid-column: 1 / -1; }
