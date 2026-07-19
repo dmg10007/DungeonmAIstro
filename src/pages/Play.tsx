@@ -26,7 +26,6 @@ const VERBOSITY_LABELS: Record<number, string> = {
   1: 'Terse', 2: 'Concise', 3: 'Balanced', 4: 'Rich', 5: 'Verbose',
 };
 
-// ── Clamp sidebar width between these pixel bounds ──────────────────────────
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 600;
 const SIDEBAR_DEFAULT = 280;
@@ -176,7 +175,6 @@ function PassphraseModal({ onSubmit, onCancel, error }: {
   );
 }
 
-// ── Drag-to-resize hook ──────────────────────────────────────────────────────
 function useResizableSplit(defaultWidth: number) {
   const [sidebarWidth, setSidebarWidth] = useState(defaultWidth);
   const dragging = useRef(false);
@@ -226,7 +224,9 @@ export default function Play() {
   const [passphraseError, setPassphraseError] = useState<string | null>(null);
   const [pendingInput, setPendingInput] = useState('');
   const [dmError, setDmError] = useState<string | null>(null);
-  const [notifyDMOnRoll, setNotifyDMOnRoll] = useState(true); // on by default
+  const [notifyDMOnRoll, setNotifyDMOnRoll] = useState(true);
+  // full-sheet toggle — default collapsed
+  const [sheetFullView, setSheetFullView] = useState(false);
   const passphraseRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -561,9 +561,51 @@ export default function Play() {
               <CombatTracker />
             </div>
           )}
+
+          {/* ── Character Sheet panel ── */}
           {panel === 'sheet' && activeCharacter && (
-            <div className="card">
-              <CharacterSheet character={activeCharacter} ruleset={ruleset} />
+            <div className="card sheet-card">
+              {/* Sheet header: title + full-sheet toggle */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                marginBottom: 'var(--space-3)',
+                paddingBottom: 'var(--space-2)',
+                borderBottom: '1px solid var(--color-divider)',
+                flexShrink: 0,
+              }}>
+                <span style={{ fontWeight: 600, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  Character Sheet
+                </span>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', userSelect: 'none' }}>
+                  <span>Full</span>
+                  <button
+                    role="switch"
+                    aria-checked={sheetFullView}
+                    aria-label="Show full character sheet"
+                    onClick={() => setSheetFullView(v => !v)}
+                    style={{
+                      width: '36px', height: '20px', borderRadius: 'var(--radius-full)',
+                      background: sheetFullView ? 'var(--color-primary)' : 'var(--color-border)',
+                      position: 'relative', flexShrink: 0,
+                      transition: 'background 180ms ease',
+                      border: 'none', cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{
+                      position: 'absolute', top: '3px',
+                      left: sheetFullView ? '19px' : '3px',
+                      width: '14px', height: '14px', borderRadius: '50%', background: 'white',
+                      transition: 'left 180ms ease',
+                      boxShadow: '0 1px 3px oklch(0 0 0 / 0.2)',
+                    }} />
+                  </button>
+                </label>
+              </div>
+
+              {/* Scrollable sheet body */}
+              <div className="sheet-scroll">
+                <CharacterSheet character={activeCharacter} ruleset={ruleset} full={sheetFullView} />
+              </div>
             </div>
           )}
 
@@ -744,6 +786,30 @@ export default function Play() {
           overflow: hidden;
         }
 
+        /* Sheet card: fixed height + internal scroll */
+        .sheet-card {
+          display: flex;
+          flex-direction: column;
+          /* Cap at ~70% of viewport height so other sidebar cards stay reachable */
+          max-height: 70dvh;
+          overflow: hidden;
+        }
+        .sheet-scroll {
+          overflow-y: auto;
+          overflow-x: hidden;
+          flex: 1;
+          min-height: 0;
+          /* Subtle fade at the bottom to hint that more content is scrollable */
+          mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent 100%);
+          -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent 100%);
+          padding-bottom: var(--space-4);
+          scrollbar-width: thin;
+          scrollbar-color: var(--color-border) transparent;
+        }
+        .sheet-scroll::-webkit-scrollbar { width: 4px; }
+        .sheet-scroll::-webkit-scrollbar-track { background: transparent; }
+        .sheet-scroll::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 9999px; }
+
         @media (max-width: 900px) {
           .play-grid {
             grid-template-columns: 1fr !important;
@@ -774,6 +840,13 @@ export default function Play() {
           .play-sidebar > .card:nth-child(3),
           .play-sidebar > .card:nth-child(4) {
             grid-column: 1 / -1;
+          }
+          /* On mobile let the sheet grow naturally; parent already scrolls */
+          .sheet-card { max-height: none; }
+          .sheet-scroll {
+            overflow: visible;
+            mask-image: none;
+            -webkit-mask-image: none;
           }
         }
 
