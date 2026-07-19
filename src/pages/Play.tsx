@@ -225,7 +225,6 @@ export default function Play() {
   const [pendingInput, setPendingInput] = useState('');
   const [dmError, setDmError] = useState<string | null>(null);
   const [notifyDMOnRoll, setNotifyDMOnRoll] = useState(true);
-  // full-sheet toggle — default collapsed
   const [sheetFullView, setSheetFullView] = useState(false);
   const passphraseRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -537,7 +536,17 @@ export default function Play() {
         </div>
 
         {/* ── Sidebar ── */}
-        <div className="play-sidebar">
+        {/*
+          Layout intent:
+          - The sidebar is a flex column that fills the full viewport height.
+          - The tool-button row and any non-sheet cards are fixed-height (flex-shrink:0).
+          - When the sheet panel is open, .sheet-card gets flex:1 and min-height:0
+            so it expands to fill ALL remaining vertical space.
+          - The sheet's internal scroll region (.sheet-scroll) then handles overflow.
+          - The sidebar itself does NOT scroll — the sheet card IS the scroll region.
+          - When the sheet is closed the sidebar reverts to normal overflow-y:auto.
+        */}
+        <div className={`play-sidebar${panel === 'sheet' ? ' sidebar-sheet-open' : ''}`}>
 
           <div className="play-sidebar-btns">
             <button className={`btn ${panel === 'dice' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPanel(p => p === 'dice' ? null : 'dice')}>🎲 Dice</button>
@@ -552,12 +561,12 @@ export default function Play() {
           </div>
 
           {panel === 'dice' && (
-            <div className="card">
+            <div className="card" style={{ flexShrink: 0 }}>
               <DiceRoller onRoll={handleDiceRoll} actorType="player" />
             </div>
           )}
           {panel === 'combat' && (
-            <div className="card">
+            <div className="card" style={{ flexShrink: 0 }}>
               <CombatTracker />
             </div>
           )}
@@ -565,7 +574,7 @@ export default function Play() {
           {/* ── Character Sheet panel ── */}
           {panel === 'sheet' && activeCharacter && (
             <div className="card sheet-card">
-              {/* Sheet header: title + full-sheet toggle */}
+              {/* Sheet header */}
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 marginBottom: 'var(--space-3)',
@@ -602,86 +611,89 @@ export default function Play() {
                 </label>
               </div>
 
-              {/* Scrollable sheet body */}
+              {/* Scrollable sheet body — this is the ONE scroll region for the sheet */}
               <div className="sheet-scroll">
                 <CharacterSheet character={activeCharacter} ruleset={ruleset} full={sheetFullView} />
               </div>
             </div>
           )}
 
-          {/* Notify DM toggle */}
-          <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Notify DM on roll</div>
-              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                {notifyDMOnRoll ? 'Every roll sends a note to the DM' : 'Only crits auto-notify the DM'}
+          {/* ── Static sidebar cards (always visible, shrink below sheet) ── */}
+          <div className="sidebar-static">
+            {/* Notify DM toggle */}
+            <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Notify DM on roll</div>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  {notifyDMOnRoll ? 'Every roll sends a note to the DM' : 'Only crits auto-notify the DM'}
+                </div>
               </div>
+              <button
+                role="switch" aria-checked={notifyDMOnRoll} aria-label="Notify DM on every roll"
+                onClick={() => setNotifyDMOnRoll(v => !v)}
+                style={{
+                  width: '44px', height: '24px', borderRadius: 'var(--radius-full)',
+                  background: notifyDMOnRoll ? 'var(--color-primary)' : 'var(--color-border)',
+                  position: 'relative', flexShrink: 0, transition: 'background 180ms ease',
+                  border: 'none', cursor: 'pointer',
+                }}
+              >
+                <span style={{
+                  position: 'absolute', top: '3px', left: notifyDMOnRoll ? '23px' : '3px',
+                  width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                  transition: 'left 180ms ease', boxShadow: '0 1px 3px oklch(0 0 0 / 0.2)',
+                }} />
+              </button>
             </div>
-            <button
-              role="switch" aria-checked={notifyDMOnRoll} aria-label="Notify DM on every roll"
-              onClick={() => setNotifyDMOnRoll(v => !v)}
-              style={{
-                width: '44px', height: '24px', borderRadius: 'var(--radius-full)',
-                background: notifyDMOnRoll ? 'var(--color-primary)' : 'var(--color-border)',
-                position: 'relative', flexShrink: 0, transition: 'background 180ms ease',
-                border: 'none', cursor: 'pointer',
-              }}
-            >
-              <span style={{
-                position: 'absolute', top: '3px', left: notifyDMOnRoll ? '23px' : '3px',
-                width: '18px', height: '18px', borderRadius: '50%', background: 'white',
-                transition: 'left 180ms ease', boxShadow: '0 1px 3px oklch(0 0 0 / 0.2)',
-              }} />
-            </button>
-          </div>
 
-          {/* Party */}
-          {campaign.characters.length > 0 && (
-            <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-              <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Party</div>
-              {campaign.characters.map(c => (
-                <div key={c.id} style={{ fontSize: 'var(--text-xs)', display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', color: 'var(--color-text-muted)' }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{c.characterName}</span>
-                  <span style={{ flexShrink: 0 }}>{c.class} {c.level > 0 ? c.level : ''}</span>
+            {/* Party */}
+            {campaign.characters.length > 0 && (
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Party</div>
+                {campaign.characters.map(c => (
+                  <div key={c.id} style={{ fontSize: 'var(--text-xs)', display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', color: 'var(--color-text-muted)' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{c.characterName}</span>
+                    <span style={{ flexShrink: 0 }}>{c.class} {c.level > 0 ? c.level : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Campaign info */}
+            <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>Campaign</div>
+              <div>Mode: {campaign.options.mode === 'one_shot' ? 'One-shot' : 'Campaign'}</div>
+              <div>Tone: {campaign.options.tone.join(', ')}</div>
+              <div>Experience: {campaign.options.experienceLevel}</div>
+              <div>Rules: {rulesLabel}</div>
+              <div>Narrative: {narrativeLabel}</div>
+              <div>Verbosity: {verbosityLabel}</div>
+              <div>Safety: {campaign.options.safetyMode}</div>
+              <button
+                className="btn btn-ghost"
+                style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', padding: 'var(--space-1) var(--space-2)' }}
+                onClick={() => navigate('/setup')}
+              >New Adventure</button>
+            </div>
+
+            {/* Slash reference */}
+            <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>/ Commands</div>
+              {[
+                ['/roll d20', 'Roll a d20'],
+                ['/roll 2d6+3', 'Roll 2d6+3'],
+                ['/roll d20-1', 'Named roll'],
+                ['/adv perception', 'Advantage'],
+                ['/dis athletics', 'Disadvantage'],
+              ].map(([cmd, desc]) => (
+                <div key={cmd} style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', overflow: 'hidden' }}>
+                  <code style={{ background: 'var(--color-surface-offset)', borderRadius: 'var(--radius-sm)', padding: '1px var(--space-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flexShrink: 1 }}>{cmd}</code>
+                  <span style={{ color: 'var(--color-text-faint)', flexShrink: 0 }}>{desc}</span>
                 </div>
               ))}
-            </div>
-          )}
-
-          {/* Campaign info */}
-          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-            <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>Campaign</div>
-            <div>Mode: {campaign.options.mode === 'one_shot' ? 'One-shot' : 'Campaign'}</div>
-            <div>Tone: {campaign.options.tone.join(', ')}</div>
-            <div>Experience: {campaign.options.experienceLevel}</div>
-            <div>Rules: {rulesLabel}</div>
-            <div>Narrative: {narrativeLabel}</div>
-            <div>Verbosity: {verbosityLabel}</div>
-            <div>Safety: {campaign.options.safetyMode}</div>
-            <button
-              className="btn btn-ghost"
-              style={{ marginTop: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', padding: 'var(--space-1) var(--space-2)' }}
-              onClick={() => navigate('/setup')}
-            >New Adventure</button>
-          </div>
-
-          {/* Slash reference */}
-          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-            <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>/ Commands</div>
-            {[
-              ['/roll d20', 'Roll a d20'],
-              ['/roll 2d6+3', 'Roll 2d6+3'],
-              ['/roll d20-1', 'Named roll'],
-              ['/adv perception', 'Advantage'],
-              ['/dis athletics', 'Disadvantage'],
-            ].map(([cmd, desc]) => (
-              <div key={cmd} style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', overflow: 'hidden' }}>
-                <code style={{ background: 'var(--color-surface-offset)', borderRadius: 'var(--radius-sm)', padding: '1px var(--space-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flexShrink: 1 }}>{cmd}</code>
-                <span style={{ color: 'var(--color-text-faint)', flexShrink: 0 }}>{desc}</span>
+              <div style={{ marginTop: 'var(--space-1)', padding: 'var(--space-2)', background: 'var(--color-gold-highlight)', borderRadius: 'var(--radius-sm)', color: 'var(--color-gold)', fontWeight: 600 }}>
+                ✨ Nat 20 / 💀 Nat 1 always notify the DM
               </div>
-            ))}
-            <div style={{ marginTop: 'var(--space-1)', padding: 'var(--space-2)', background: 'var(--color-gold-highlight)', borderRadius: 'var(--radius-sm)', color: 'var(--color-gold)', fontWeight: 600 }}>
-              ✨ Nat 20 / 💀 Nat 1 always notify the DM
             </div>
           </div>
         </div>
@@ -762,6 +774,7 @@ export default function Play() {
           background: white;
         }
 
+        /* ── Sidebar base ── */
         .play-sidebar {
           min-width: 0;
           display: flex;
@@ -770,6 +783,20 @@ export default function Play() {
           overflow-y: auto;
           overflow-x: hidden;
           padding-left: var(--space-3);
+        }
+
+        /*
+         * When the sheet panel is open the sidebar stops scrolling itself.
+         * Instead, .sheet-card expands to fill all remaining vertical space
+         * and its inner .sheet-scroll handles the overflow.
+         * .sidebar-static scrolls independently below the sheet card.
+         */
+        .sidebar-sheet-open {
+          overflow: hidden;
+        }
+        .sidebar-sheet-open .sheet-card {
+          flex: 1 1 0;
+          min-height: 0;
         }
 
         .play-sidebar-btns {
@@ -786,20 +813,21 @@ export default function Play() {
           overflow: hidden;
         }
 
-        /* Sheet card: fixed height + internal scroll */
+        /* Sheet card */
         .sheet-card {
           display: flex;
           flex-direction: column;
-          /* Cap at ~70% of viewport height so other sidebar cards stay reachable */
-          max-height: 70dvh;
+          /* Default (no sheet open): natural height, sidebar scrolls */
+          flex-shrink: 0;
           overflow: hidden;
         }
+
+        /* Sheet scroll region */
         .sheet-scroll {
           overflow-y: auto;
           overflow-x: hidden;
           flex: 1;
           min-height: 0;
-          /* Subtle fade at the bottom to hint that more content is scrollable */
           mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent 100%);
           -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent 100%);
           padding-bottom: var(--space-4);
@@ -810,6 +838,23 @@ export default function Play() {
         .sheet-scroll::-webkit-scrollbar-track { background: transparent; }
         .sheet-scroll::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 9999px; }
 
+        /* Static cards below the sheet */
+        .sidebar-static {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-3);
+          flex-shrink: 0;
+          /* When sheet is open, this section scrolls independently */
+          overflow-y: auto;
+          overflow-x: hidden;
+          scrollbar-width: thin;
+          scrollbar-color: var(--color-border) transparent;
+        }
+        .sidebar-static::-webkit-scrollbar { width: 4px; }
+        .sidebar-static::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-static::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 9999px; }
+
+        /* ── Mobile / tablet ── */
         @media (max-width: 900px) {
           .play-grid {
             grid-template-columns: 1fr !important;
@@ -833,20 +878,23 @@ export default function Play() {
             align-items: start;
             padding-left: 0;
           }
-          .play-sidebar-btns {
-            grid-column: 1 / -1;
+          .sidebar-sheet-open {
+            overflow: visible;
           }
+          .play-sidebar-btns { grid-column: 1 / -1; }
           .play-sidebar > .card:nth-child(2),
           .play-sidebar > .card:nth-child(3),
-          .play-sidebar > .card:nth-child(4) {
-            grid-column: 1 / -1;
-          }
-          /* On mobile let the sheet grow naturally; parent already scrolls */
-          .sheet-card { max-height: none; }
+          .play-sidebar > .card:nth-child(4) { grid-column: 1 / -1; }
+          /* On mobile the sheet grows naturally; page scrolls */
+          .sheet-card { max-height: none; flex: none; }
           .sheet-scroll {
             overflow: visible;
             mask-image: none;
             -webkit-mask-image: none;
+          }
+          .sidebar-static {
+            grid-column: 1 / -1;
+            overflow: visible;
           }
         }
 
